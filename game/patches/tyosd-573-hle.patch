@@ -63,3 +63,7 @@ sustituye el else generico por else-if 0x30000 con volcado de 10x16 B.
 El EE (0x627afc: bnez v0 -> exito/0x627b14) reintentaba con v0==0
 (281 polls de rpc=0x0). Ahora la rama responde exito y salta el
 SifCallRpc real (unhandled) para este sid.
+
+--- parche (4): dump recv del poll 0x0 (una vez) + gp+0x44/48 ---
+Ver rama sid == 0x573: el loop de poll no depende de v0 (v0=1 no
+cambia nada: 278 polls, gif=2). Hay que ver que condicion espera.
