@@ -55,7 +55,19 @@ crashea, igual clasifica el bloqueante como "señal VSync/DMA faltante" y el
 fix real va por `sceGsSyncV` (`0x4d3730`) / `sceDmaSync` (`0x4d02f8`) o el
 handler de interrupción, no por este parche.
 
-## Pasos pendientes (requieren confirmación por costo)
+## Resultado triage (2026-10-03, `coldboot-triage2.log`)
+
+- Override enganchó: 229 líneas `[triage]`, `a/b` son punteros que difieren en
+  16 (`0xA96800/0xB16000…`), a veces iguales naturalmente; `flag5D0` 1→0.
+- NO desbloquea render: `gif=2` clavado, `vramNonZero=0`, frames negros.
+  Histograma cambia de `pc=0x6e4d98` a `pc=0x6e4cdc` x23: sale del spin
+  interno pero vuelve (cola consumidora hambrienta).
+- Solo 1 `sceDmaSend` en todo el run; RPCs `sid=0x573` (`rpc=0x20000/0x30000`,
+  `pc=0x627ab0/0x627afc`) sin handler (`IOP/RPC trace:unhandled`).
+- Clasificación: la espera es síntoma; falta el **productor** (streaming vía
+  RPC `0x573`, probable IRX propio del juego). Forzar el consumidor no crea
+  datos. Fix real: identificar el servidor `0x573` (módulo IRX en disco,
+  `sceSifBindRpc client=0xa44020`), no este parche. Triage cumplido.
 
 1. Pegar snippet, rebuild `-j4` con `Unix Makefiles` (verificar antes que no
    haya `cc1plus` zombies; riesgo OOM, build completo previo 1.5 GB).
