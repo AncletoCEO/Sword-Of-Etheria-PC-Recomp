@@ -1,0 +1,56 @@
+Contexto: rama `sid == 0x573` dentro de `sifCallRpcStub::applyFixups`.
+Aplica con `patch -p1` desde la raíz del clon PS2Recomp.
+
+--- a/ps2xRuntime/src/lib/game_overrides.cpp
++++ b/ps2xRuntime/src/lib/game_overrides.cpp
+@@ -1137,13 +1137,52 @@
+                 else if (sid == 0x573u || clientPtr == 0x00A44020u) {
+-                    // Tokyo Sound Design (TYOSD) driver SD.BIN initialization
++                    // Tokyo Sound Design (TYOSD) driver SD.BIN streaming.
++                    // rpc 0x10000 = open "cdrom0:\SD.BIN;1" (send=path, recv 20B)
++                    // rpc 0x20000/0x0 = poll done. rpc 0x30000 = streaming
++                    // transfer request (send 640B desc, recv 352B).
+                     uint32_t recvBuf = savedA5Recv;
+                     if (recvBuf == 0) recvBuf = 0x00A44900u;
+-                    uint32_t phys = recvBuf & 0x01FFFFFFu;
+-                    if (phys + 20 <= 0x02000000u) {
+-                        uint32_t soundBase = 0x0006C000u;
+-                        std::memcpy(rdram + phys, &soundBase, 4);
+-                        std::memset(rdram + phys + 4, 0, 16);
++                    const uint32_t sendBuf = static_cast<uint32_t>(_mm_cvtsi128_si32(ctx->r[7]));
++                    uint32_t recvSize = static_cast<uint32_t>(_mm_cvtsi128_si32(ctx->r[10]));
++                    if (recvSize == 0 || recvSize > 512) recvSize = 20;
++                    const uint32_t rphys = recvBuf & 0x01FFFFFFu;
++                    if (rphys + recvSize <= 0x02000000u) {
++                        std::memset(rdram + rphys, 0, recvSize);
++                        uint32_t one = 1;
++                        std::memcpy(rdram + rphys, &one, 4); // status: done
++                    }
++                    if (rpcNum == 0x10000u) {
++                        // Report real SD.BIN size so the EE sizes its ring.
++                        char path[128] = {};
++                        const uint32_t sph = (sendBuf + 4) & 0x01FFFFFFu;
++                        if (sph + sizeof(path) <= 0x02000000u) {
++                            std::memcpy(path, rdram + sph, sizeof(path) - 1);
++                        }
++                        std::error_code ec2;
++                        const auto io = PS2Runtime::getIoPaths();
++                        std::filesystem::path sd = io.cdRoot / "SD.BIN";
++                        if (!std::filesystem::exists(sd, ec2)) {
++                            sd = io.cdImage.parent_path() / "SD.BIN";
++                        }
++                        uint32_t fsize = 0, sectors = 0;
++                        if (std::filesystem::exists(sd, ec2)) {
++                            fsize = static_cast<uint32_t>(std::filesystem::file_size(sd, ec2));
++                            sectors = (fsize + 2047) / 2048;
++                        }
++                        RUNTIME_LOG("[TYOSD] open path=" << path << " size=" << fsize);
++                        if (rphys + 12 <= 0x02000000u) {
++                            std::memcpy(rdram + rphys + 4, &fsize, 4);
++                            std::memcpy(rdram + rphys + 8, &sectors, 4);
++                        }
++                    }
++                    else {
++                        RUNTIME_LOG("[TYOSD] rpc=0x" << std::hex << rpcNum << std::dec << " ack done");
+                     }
+                 }
