@@ -36,6 +36,24 @@ El build completo tarda horas (recompila el ELF a ~18k `.cpp` y enlaza
 ~1.5 GB). Usá `-j4`; con más paralelismo el OOM killer mata `cc1plus`.
 El splitter (`game/split_monsters.py`) corre solo tras cada `ps2_recomp`.
 
+## Herramientas
+
+Flujo spec-driven con [`@ancleto/spec`](https://www.npmjs.com/package/@ancleto/spec)
+([repo](https://github.com/damianarganaras/spec)): proposal, design y tasks en
+`aspec/`, skills `ancleto-*`/`cleto-*` en el agente.
+
+- Recompilador: [PS2Recomp](https://github.com/ran-j/PS2Recomp) (`ps2xAnalyzer`,
+  `ps2xRecomp`, `ps2xRuntime`, `ps2xIOP`).
+- Análisis: [Ghidra](https://github.com/NationalSecurityAgency/ghidra) (12.1.4,
+  requiere JDK) + `ExportPS2Functions.java` de PS2Recomp y wrapper headless en
+  `aspec/.../ghidra/`; MCP experimental
+  [ghidra-mcp](https://github.com/bethington/ghidra-mcp) (no versionado).
+- Toolchain Linux: Git, CMake 3.20+, Ninja (o Unix Makefiles para 18k TUs),
+  GCC C++20, Python 3, `bsdtar`. Windows: MSVC C++20, 7-Zip.
+- Librerías del runtime (las baja CMake): [raylib](https://github.com/raysan5/raylib)
+  5.5, [Dear ImGui](https://github.com/ocornut/imgui) + rlImGui, FFmpeg, SDL/mesa.
+- Disco: tu ISO PAL Europa (MD5 arriba); extracción del ELF con `bsdtar`/`7z`.
+
 ## Layout
 
 - `game/` — `CMakeLists.txt`, `game_main.cpp`, `split_monsters.py`,
