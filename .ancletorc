@@ -1,0 +1,45 @@
+{
+  "schemaVersion": 1,
+  "installedAt": "2026-10-02T17:01:37.865Z",
+  "installedPaths": {
+    "templates": [
+      "AGENTS.md",
+      "PRODUCT.md"
+    ],
+    "agents": [
+      ".opencode/agents",
+      ".agents/agents"
+    ],
+    "commands": [
+      ".opencode/commands"
+    ],
+    "skills": [
+      ".opencode/skills",
+      ".agents/skills"
+    ]
+  },
+  "agent": "antigravity",
+  "language": "auto",
+  "gratisModel": "opencode/muse-spark-1.3-contributor-free",
+  "azure": {
+    "enabled": false
+  },
+  "discovery": {
+    "outputDir": "docs/technical-discovery",
+    "exclude": [
+      "**/*.test.*",
+      "**/*.spec.*",
+      "**/__tests__/**",
+      "**/*.png",
+      "**/*.jpg",
+      "**/*.svg",
+      "**/*.ico",
+      "public",
+      "package-lock.json",
+      "yarn.lock",
+      "pnpm-lock.yaml"
+    ]
+  },
+  "profile": "general",
+  "version": "0.10.0"
+}
