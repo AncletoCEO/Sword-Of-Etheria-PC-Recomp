@@ -1,0 +1,43 @@
+# Generado para Linux 2026-09-26 a partir del export Ghidra de Windows.
+# Mismos conteos, paths Linux absolutos. El build NO usa config.toml de Windows.
+#
+# Classification policy (aligned with analyzer intent):\n# - runtime-known names -> [general].stubs
+# - library-like names without runtime handlers -> [general].untracked_stubs
+# - [general].skip is retained empty for legacy compatibility
+# - no SCE symbol database is used by this Ghidra script
+
+[general]
+input = "/home/lubonch/Repos/Sword-Of-Etheria-PC-Recomp/work/elf/SLES_537.68"
+output = "/home/lubonch/Repos/Sword-Of-Etheria-PC-Recomp/work/generated"
+ghidra_output = "/home/lubonch/Repos/Sword-Of-Etheria-PC-Recomp/aspec/changes/recompile-sword-of-etheria/ghidra_functions.csv"
+single_file_output = false
+patch_syscalls = false
+patch_cop0 = true
+patch_cache = true
+stubs = [
+]
+untracked_stubs = [
+]
+skip = []
+
+# Bloqueante #1 (2026-10-02):
+# 0x4c0008-0x4c008c es solo el reset de registros del EE bootstrap.
+# 0x4c008c es un "b ." (spin loop) que en PS2 real espera el reschedule del kernel.
+# En PS2Recomp no hay otro thread → redirigimos al verdadero arranque del juego
+# en 0x4c0218 (thunk_FUN_004dda18), primer código real del juego tras el bootstrap.
+[patches]
+instructions = [
+    { address = 0x4c008c, value = 0x08130086 }
+]
+# 0x08130086 = j 0x4c0218  (J-type MIPS: op=2, target=0x4c0218>>2=0x130086)
+
+[ghidra_export]
+function_count = 7672
+code_label_count = 10100
+csv_record_count = 17772
+stub_count = 0
+untracked_stub_count = 0
+skip_count = 0
+uncategorized_count = 7672
+runtime_call_name_count = 656
+runtime_call_source = "embedded_ps2_call_list_snapshot"
