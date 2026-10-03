@@ -1,0 +1,40 @@
+# Archivos del juego y material con copyright: nunca se versionan
+*.iso
+*.elf
+*.bin
+*.exe
+
+# Directorios de trabajo locales del change recompile-sword-of-etheria
+work/
+tools/
+out/
+out-linux/
+
+# Clones externos / desorden local (no versionar)
+ghidra-mcp/
+mc0/
+mc1/
+
+# Artefactos de build de CMake / MSVC
+build/
+cmake-build-*/
+*.obj
+*.pdb
+*.lib
+*.dll
+
+# C++ generado por ps2x_recomp
+*.recomp.cpp
+
+# Ghidra
+*.gpr
+*.rep/
+
+# Logs y memoria local (no versionar contenido del juego ni ruido)
+*.log
+ps2_log.txt
+**/node_modules/
+.ancleto/memory.db-journal
+
+# Nota: NO ignorar a propósito: game/, build_release.py, README.md, .github/
+# para que el release y CI sí se versionen.
