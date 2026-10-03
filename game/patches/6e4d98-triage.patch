@@ -1,12 +1,20 @@
+Ubicación: DESPUÉS del bloque redirect fullRenderFunc
+(0x006cba48..0x009cbd34), NO junto a los bloqueantes #1-#4. 0x6e4d98 cae
+dentro de ese rango y el redirect lo pisa si se registra antes
+(verificado 2026-10-03: cero líneas [triage] en coldboot-triage.log,
+count fullRenderFunc 18884->18885).
+
 --- a/ps2xRuntime/src/lib/game_overrides.cpp
 +++ b/ps2xRuntime/src/lib/game_overrides.cpp
-@@ -648,6 +648,29 @@ namespace ps2_game_overrides
-         runtime.replaceFunction(0x004ddbc4u, returnStub4ddbc4);
-
+@@ -2678,6 +2678,29 @@ namespace ps2_game_overrides
+             RUNTIME_LOG("[game_overrides] Replaced " << replacedCount
+                         << " separate/truncated stub function slots with fullRenderFunc (0x006cba48).");
+         }
++
 +        // TRIAGE pantalla negra (2026-10-03, temporal solo para clasificar):
 +        // spin en 0x6e4d98 espera gp+0x638 == gp+0x63C (coldboot-negro.log:
 +        // tick 5400, gif=2 clavado, vram vacía). Igualamos contadores y se
-+        // reanuda en 0x6e4ddac como si el bnel no se hubiese tomado (s0=0).
++        // reanuda en 0x6e4dac como si el bnel no se hubiese tomado (s0=0).
 +        // Si sale del loop, el fix real va en sceGsSyncV/sceDmaSync, no aquí.
 +        static auto triage6e4d98 = [](uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime) {
 +            (void)runtime;
@@ -25,4 +33,4 @@
 +        };
 +        runtime.replaceFunction(0x6e4d98u, triage6e4d98);
 +
-         // FUN_004c3a90 (memset) return stub: 0x004c3b48 -> jr $ra; daddu $v0, $a0, $zero
+         // Save presentation frame screenshot helper
