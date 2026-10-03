@@ -38,21 +38,35 @@ El splitter (`game/split_monsters.py`) corre solo tras cada `ps2_recomp`.
 
 ## Herramientas
 
-Flujo spec-driven con [`@ancleto/spec`](https://www.npmjs.com/package/@ancleto/spec)
-([repo](https://github.com/damianarganaras/spec)): proposal, design y tasks en
-`aspec/`, skills `ancleto-*`/`cleto-*` en el agente.
+Cómo se usó cada una en este proceso:
 
-- Recompilador: [PS2Recomp](https://github.com/ran-j/PS2Recomp) (`ps2xAnalyzer`,
-  `ps2xRecomp`, `ps2xRuntime`, `ps2xIOP`).
+- Flujo spec-driven con [`@ancleto/spec`](https://www.npmjs.com/package/@ancleto/spec)
+  ([repo](https://github.com/damianarganaras/spec)): proposal, design y tasks en
+  `aspec/changes/recompile-sword-of-etheria/`; skills `ancleto-apply` (implementar),
+  `ancleto-verify` (verificar) y `cleto-*` en el agente; memoria del proyecto en
+  `.ancleto/memory.db`.
+- Modelos de IA: solo se usaron **Big Pickle** y **Muse Spark**, ofrecidos por
+  **OpenCode Zen** (agente OpenCode con las skills de arriba, commits atomizados
+  + push por cada cambio).
+- Recompilador: [PS2Recomp](https://github.com/ran-j/PS2Recomp). `ps2xAnalyzer`
+  como vía alternativa de análisis; `ps2xRecomp` tradujo el ELF a C++
+  (17771 archivos en `work/generated/`); `ps2xRuntime` es contra lo que enlaza
+  el juego e incluye `game_overrides.cpp` (162 syscall stubs + hooks de
+  CD/Pad/GS); `ps2xIOP` ejecuta los IRX originales con fallbacks HLE.
 - Análisis: [Ghidra](https://github.com/NationalSecurityAgency/ghidra) (12.1.4,
-  requiere JDK) + `ExportPS2Functions.java` de PS2Recomp y wrapper headless en
-  `aspec/.../ghidra/`; MCP experimental
-  [ghidra-mcp](https://github.com/bethington/ghidra-mcp) (no versionado).
-- Toolchain Linux: Git, CMake 3.20+, Ninja (o Unix Makefiles para 18k TUs),
-  GCC C++20, Python 3, `bsdtar`. Windows: MSVC C++20, 7-Zip.
+  requiere JDK) con `ExportPS2Functions.java` de PS2Recomp: exportó
+  `ghidra_functions.csv` (7672 funciones) y el `config.toml` base; wrapper
+  headless en `aspec/.../ghidra/`. MCP experimental
+  [ghidra-mcp](https://github.com/bethington/ghidra-mcp) (clon local, no versionado).
+- Toolchain Linux: Git (SSH), CMake 3.20+, Ninja → Unix Makefiles (Ninja se traba
+  con 18k archivos), GCC C++20, Python 3 (`build_release.py`, `split_monsters.py`
+  para partir monstruos de 75–235 MB), `bsdtar` (extracción ISO → `SLES_537.68`).
+  Windows: MSVC C++20 y 7-Zip para lo mismo.
 - Librerías del runtime (las baja CMake): [raylib](https://github.com/raysan5/raylib)
-  5.5, [Dear ImGui](https://github.com/ocornut/imgui) + rlImGui, FFmpeg, SDL/mesa.
-- Disco: tu ISO PAL Europa (MD5 arriba); extracción del ELF con `bsdtar`/`7z`.
+  5.5 (ventana 640x448 y subida del framebuffer), [Dear ImGui](https://github.com/ocornut/imgui)
+  + rlImGui (UI de debug), FFmpeg (video), SDL/mesa (GL en Linux).
+- Disco: tu ISO PAL Europa (MD5 arriba); el repo nunca versiona ISO, ELF, BINs
+  ni `work/`/`tools/`.
 
 ## Layout
 
