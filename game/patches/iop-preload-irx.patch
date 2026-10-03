@@ -1,0 +1,104 @@
+Precarga de los IRX del IOP (Sword of Etheria).
+
+Diagnóstico: en todas las trazas de RPC del boot aparecía `loadedModules=[]`
+y ni un solo `LoadModule` en toda la sesión. En una PS2 real el CRT0 carga los
+IRX de IOPRP300 antes de saltar al juego; este recomp entra al juego con el
+IOP vacío, así que no existen los servidores de sonido, pad ni CD.
+
+`PS2Runtime::run()` hace `resetIop()` al arrancar, por eso la carga va dentro
+del stub de `sceSifInitRpc` (que el juego invoca ya con el IOP en pie) y no en
+`game_main.cpp` antes de `run()`.
+
+Contexto: applies con `patch -p1` desde la raíz del clon de PS2Recomp.
+
+--- (1) includes
+--- a/ps2xRuntime/src/lib/game_overrides.cpp
++++ b/ps2xRuntime/src/lib/game_overrides.cpp
+@@ includes
+ #include <cstdio>
++#include <cstdlib>
++#include <cstring>
+ #include <filesystem>
+
+--- (2) helper: g_tyosdRealModuleId + preloadIopBootModules()
+@@ namespace (anónimo, arriba de kSwordOfEtheriaSyscallStubs)
+ namespace
+ {
+     struct SyscallStubEntry
+     {
+         uint32_t addr;
+         int32_t syscallId;
+     };
++
++    // moduleId del driver de sonido real (SDRDRV.IRX) si la precarga funcionó.
++    // Mientras sea <= 0 el HLE de sid 0x573 atiende el RPC; si el IRX carga y
++    // registra el server, el HLE se desactiva y manda el driver de verdad.
++    int g_tyosdRealModuleId = -1;
++
++    // Orden de arranque de IOPRP300: IOMAN/SIO2 -> libsd -> stream de sonido
++    // -> pad -> CD -> memoria-card. Los argumentos que algunos IRX esperan
++    // (SIO2MAN, MC2_D) los pasa el juego en su propio LoadModule, que este
++    // juego nunca hace, así que se cargan sin argumentos.
++    void preloadIopBootModules(PS2Runtime *runtime)
++    {
++        static bool done = false;
++        if (done)
++        {
++            return;
++        }
++        done = true;
++
++        const auto io = PS2Runtime::getIoPaths();
++        std::filesystem::path dir = io.cdRoot / "IOP";
++        if (const char *env = std::getenv("SWORD_IOP_DIR"))
++        {
++            if (*env != '\0')
++            {
++                dir = env;
++            }
++        }
++        if (!std::filesystem::is_directory(dir))
++        {
++            RUNTIME_LOG("[iop-preload] no hay directorio IRX en " << dir.string());
++            return;
++        }
++
++        static const char *const kBootOrder[] = {
++            "SIO2MAN.IRX", "SIO2D.IRX", "LIBSMF2.IRX", "LIBSD.IRX", "SDSTR3.IRX",
++            "SD_CALL.IRX", "SDRDRV.IRX", "PADMAN.IRX", "CDVDSTM.IRX", "DBCMAN.IRX",
++            "MC2_D.IRX",
++        };
++
++        RUNTIME_LOG("[iop-preload] cargando IRX desde " << dir.string());
++        for (const char *name : kBootOrder)
++        {
++            const std::filesystem::path path = dir / name;
++            if (!std::filesystem::exists(path))
++            {
++                RUNTIME_LOG("[iop-preload] falta " << name);
++                continue;
++            }
++            const auto result = runtime->loadIopModule(path.string());
++            RUNTIME_LOG("[iop-preload] " << name << " moduleId=" << result.moduleId
++                                              << " start=" << result.startResult);
++            if (std::strcmp(name, "SDRDRV.IRX") == 0 && result.moduleId > 0)
++            {
++                g_tyosdRealModuleId = result.moduleId;
++            }
++        }
++        RUNTIME_LOG("[iop-preload] fin; TYOSD real=" << g_tyosdRealModuleId);
++    }
+
+--- (3) llamada dentro del stub de sceSifInitRpc (0x004d6860)
+@@ stub sifInitRpcStub
+         static auto sifInitRpcStub = [](uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime) {
++            preloadIopBootModules(runtime);
+             static bool loggedInitOnce = false;
+
+--- (4) el HLE de TYOSD deja de tapar al driver real
+@@ rama sid == 0x573 dentro de sifCallRpcStub::applyFixups
+-                else if (sid == 0x573u || clientPtr == 0x00A44020u) {
++                else if ((sid == 0x573u || clientPtr == 0x00A44020u) && g_tyosdRealModuleId <= 0) {
+
+Verificación: `cmake --build work/build-game/out-linux -j4` (EXIT=0) y buscar
+`[iop-preload]` en el log del run.
