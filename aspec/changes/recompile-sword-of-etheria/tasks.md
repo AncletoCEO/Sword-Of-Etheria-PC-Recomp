@@ -52,7 +52,7 @@
 
 - [x] Ordenar archivos desordenados en raíz y change (2026-10-03: creados `game/CMakeLists.txt`, `game/game_main.cpp`, `game/split_monsters.py` promovidos desde `work/` ignorado; `ps2_log.txt` raíz movido a `work/ps2_log-root.txt`; `.git` bogus solo-logs eliminado para re-init; `work/` 13G, `tools/` 4.2G e ISO 4.4G quedan fuera por `.gitignore`)
 - [x] Revisar `.gitignore` (2026-10-03: agrega `out-linux/`, `ghidra-mcp/`, `mc0/`, `mc1/`, `*.log`, `**/node_modules/`; NO filtra `game/`, `build_release.py`, `README.md`, `.github/`)
-- [ ] Serie de commits atomizados + push a GitHub (uno por grupo, mensaje convencional)
+- [x] Serie de commits atomizados + push a GitHub (2026-10-03: 6 commits `9469066..3685ecb` sobre `2f49663 Initial commit`, rebase + push SSH OK a `AncletoCEO/Sword-Of-Etheria-PC-Recomp main`; ISO/ELF/`work/` 13G/`tools/` 4.2G/`ghidra-mcp/`/`mc0/`/`mc1/`/`*.log` excluidos, verificado con `git status`)
 - [ ] **Test interactivo en terminal gráfica** (PENDIENTE usuario): ejecutar `./work/build-game/out-linux/sword_etheria work/elf/SLES_537.68` desde una ventana de terminal en el entorno de escritorio para comprobar la ventana de renderizado de Raylib/GLFW, la tasa de refresco en pantalla y la respuesta a los mandos/teclado.
 - [ ] Mover hacks específicos restantes al módulo de game overrides según hallazgos del test interactivo.
 - [ ] Hito de cierre: menú + inicio de partida jugable; glitches menores se registran como limitaciones conocidas, no bloquean.
