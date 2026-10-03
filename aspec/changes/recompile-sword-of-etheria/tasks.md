@@ -59,10 +59,10 @@
 
 ## Fase 5 — Publicación y release
 
-- [ ] Calcular MD5 del ISO PAL Europa: `md5sum "Sword of Etheria, The (Europe) (En,Fr,De,Es,It).iso"` y registrarlo aquí y en `build_release.py`
-- [ ] Escribir `build_release.py` con: verificación de MD5, extracción del ELF con `bsdtar`/`7z`, invocación del build CMake y empaquetado del resultado
-- [ ] Verificar que `build_release.py` rechaza un ISO con MD5 incorrecto y acepta el ISO conocido
-- [ ] Escribir `.github/workflows/release.yml` con jobs `build-linux` (`ubuntu-latest`) y `build-windows` (`windows-latest`) que compilan y suben los artefactos al release al hacer push de un tag `v*.*.*`
-- [ ] Escribir `README.md` con: descripción del proyecto, requisitos (ISO propio, Python, CMake, GCC/MSVC), instrucciones de uso de `build_release.py`, MD5 esperado del ISO, y nota legal clara
+- [x] Calcular MD5 del ISO PAL Europa: `md5sum "Sword of Etheria, The (Europe) (En,Fr,De,Es,It).iso"` y registrarlo aquí y en `build_release.py` (2026-10-03: `b9c5115b77b7f05fbf14a67df8d3f99d`)
+- [x] Escribir `build_release.py` con: verificación de MD5, extracción del ELF con `bsdtar`/`7z`, invocación del build CMake y empaquetado del resultado
+- [x] Verificar que `build_release.py` rechaza un ISO con MD5 incorrecto y acepta el ISO conocido (2026-10-03: fake.iso rechazado, ISO real aceptado con `--check-only`; build completo no ejecutado, tarda horas)
+- [x] Escribir `.github/workflows/release.yml` con jobs `build-linux` (`ubuntu-latest`) y `build-windows` (`windows-latest`) que compilan y suben los artefactos al release al hacer push de un tag `v*.*.*`
+- [x] Escribir `README.md` con: descripción del proyecto, requisitos (ISO propio, Python, CMake, GCC/MSVC), instrucciones de uso de `build_release.py`, MD5 esperado del ISO, y nota legal clara
 - [ ] Preparar el repo para GitHub: revisar `.gitignore` (que no filtre `build_release.py`, `README.md`, `.github/`), hacer commit limpio con mensaje convencional
 - [ ] Crear tag `v0.1.0` y verificar que GitHub Actions genera y publica los dos artefactos del release correctamente

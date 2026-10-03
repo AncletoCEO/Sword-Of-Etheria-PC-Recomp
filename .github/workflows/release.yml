@@ -1,0 +1,63 @@
+name: release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+jobs:
+  build-linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake ninja-build g++ python3 libgl1 libx11-6
+      - name: Clone PS2Recomp tools
+        run: git clone --recurse-submodules https://github.com/ran-j/PS2Recomp.git tools-ci
+      - name: Build ps2_recomp and ps2_analyzer
+        run: |
+          cmake -S tools-ci -B tools-ci/out -G "Unix Makefiles" -DCMAKE_BUILD_TYPE=Release
+          cmake --build tools-ci/out -j$(nproc)
+      - name: Validate release script
+        run: |
+          python3 -m py_compile build_release.py
+          python3 build_release.py --help
+      - name: Package
+        run: |
+          mkdir -p dist
+          cp tools-ci/out/ps2xRecomp/ps2_recomp tools-ci/out/ps2xAnalyzer/ps2_analyzer dist/ 2>/dev/null || cp tools-ci/out/*/ps2_* dist/
+          cp build_release.py game/CMakeLists.txt game/game_main.cpp game/split_monsters.py dist/
+          tar -czf sword-etheria-tools-linux.tar.gz -C dist .
+      - name: Upload asset
+        uses: softprops/action-gh-release@v2
+        with:
+          files: sword-etheria-tools-linux.tar.gz
+
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ilammy/msvc-dev-cmd@v1
+      - name: Clone PS2Recomp tools
+        run: git clone --recurse-submodules https://github.com/ran-j/PS2Recomp.git tools-ci
+      - name: Build ps2_recomp and ps2_analyzer
+        run: |
+          cmake -S tools-ci -B tools-ci/out -G "Visual Studio 17 2022" -A x64
+          cmake --build tools-ci/out --config Release
+      - name: Validate release script
+        run: |
+          python -m py_compile build_release.py
+          python build_release.py --help
+      - name: Package
+        run: |
+          mkdir dist
+          Get-ChildItem tools-ci/out -Recurse -Include ps2_recomp.exe,ps2_analyzer.exe | Copy-Item -Destination dist/
+          Copy-Item build_release.py, game/CMakeLists.txt, game/game_main.cpp, game/split_monsters.py dist/
+          Compress-Archive -Path dist/* -DestinationPath sword-etheria-tools-windows.zip
+        shell: pwsh
+      - name: Upload asset
+        uses: softprops/action-gh-release@v2
+        with:
+          files: sword-etheria-tools-windows.zip
