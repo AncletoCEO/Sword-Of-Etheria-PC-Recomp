@@ -1,0 +1,28 @@
+--- a/ps2xRuntime/src/lib/game_overrides.cpp
++++ b/ps2xRuntime/src/lib/game_overrides.cpp
+@@ -648,6 +648,29 @@ namespace ps2_game_overrides
+         runtime.replaceFunction(0x004ddbc4u, returnStub4ddbc4);
+
++        // TRIAGE pantalla negra (2026-10-03, temporal solo para clasificar):
++        // spin en 0x6e4d98 espera gp+0x638 == gp+0x63C (coldboot-negro.log:
++        // tick 5400, gif=2 clavado, vram vacía). Igualamos contadores y se
++        // reanuda en 0x6e4ddac como si el bnel no se hubiese tomado (s0=0).
++        // Si sale del loop, el fix real va en sceGsSyncV/sceDmaSync, no aquí.
++        static auto triage6e4d98 = [](uint8_t *rdram, R5900Context *ctx, PS2Runtime *runtime) {
++            (void)runtime;
++            const uint32_t gp = static_cast<uint32_t>(_mm_cvtsi128_si32(ctx->r[28]));
++            uint32_t a = 0, b = 0;
++            uint8_t flag = 0;
++            std::memcpy(&a, rdram + ((gp + 0x638u) & 0x01FFFFFFu), 4);
++            std::memcpy(&b, rdram + ((gp + 0x63Cu) & 0x01FFFFFFu), 4);
++            std::memcpy(&flag, rdram + ((gp + 0x5D0u) & 0x01FFFFFFu), 1);
++            RUNTIME_LOG("[triage] 0x6e4d98 counters a=" << a << " b=" << b << " flag5D0=" << (unsigned)flag);
++            std::memcpy(rdram + ((gp + 0x638u) & 0x01FFFFFFu), &b, 4);
++            ctx->r[3] = _mm_cvtsi64_si128(static_cast<int64_t>(static_cast<int32_t>(b)));
++            ctx->r[2] = _mm_cvtsi64_si128(static_cast<int64_t>(static_cast<int32_t>(b)));
++            ctx->r[16] = _mm_setzero_si128(); // $s0 = 0
++            ctx->pc = 0x6e4dacu;
++        };
++        runtime.replaceFunction(0x6e4d98u, triage6e4d98);
++
+         // FUN_004c3a90 (memset) return stub: 0x004c3b48 -> jr $ra; daddu $v0, $a0, $zero

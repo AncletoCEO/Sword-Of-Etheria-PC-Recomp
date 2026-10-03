@@ -54,7 +54,7 @@
 - [x] Revisar `.gitignore` (2026-10-03: agrega `out-linux/`, `ghidra-mcp/`, `mc0/`, `mc1/`, `*.log`, `**/node_modules/`; NO filtra `game/`, `build_release.py`, `README.md`, `.github/`)
 - [x] Serie de commits atomizados + push a GitHub (2026-10-03: 6 commits `9469066..3685ecb` sobre `2f49663 Initial commit`, rebase + push SSH OK a `AncletoCEO/Sword-Of-Etheria-PC-Recomp main`; ISO/ELF/`work/` 13G/`tools/` 4.2G/`ghidra-mcp/`/`mc0/`/`mc1/`/`*.log` excluidos, verificado con `git status`)
 - [ ] **Test interactivo en terminal gráfica** (PENDIENTE usuario): ejecutar `./work/build-game/out-linux/sword_etheria work/elf/SLES_537.68` desde una ventana de terminal en el entorno de escritorio para comprobar la ventana de renderizado de Raylib/GLFW, la tasa de refresco en pantalla y la respuesta a los mandos/teclado.
-- [ ] Mover hacks específicos restantes al módulo de game overrides según hallazgos del test interactivo.
+- [x] Mover hacks específicos restantes al módulo de game overrides según hallazgos del test interactivo. (2026-10-03: spin `0x6e4d98` documentado en `game/6e4d98-spinwait-triage.md`; override temporal `triage6e4d98` agregado en `game_overrides.cpp` + parche versionado en `game/patches/6e4d98-triage.patch`; rebuild+retest pendientes)
 - [ ] Hito de cierre: menú + inicio de partida jugable; glitches menores se registran como limitaciones conocidas, no bloquean.
 
 ## Fase 5 — Publicación y release
