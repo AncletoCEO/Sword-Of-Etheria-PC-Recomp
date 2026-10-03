@@ -54,3 +54,7 @@ Aplica con `patch -p1` desde la raíz del clon PS2Recomp.
 +                        RUNTIME_LOG("[TYOSD] rpc=0x" << std::hex << rpcNum << std::dec << " ack done");
                      }
                  }
+
+--- parche (2): dump del descriptor 0x30000 ---
+Ver rama sid == 0x573 en game_overrides.cpp: añade `#include <cstdio>` y
+sustituye el else generico por else-if 0x30000 con volcado de 10x16 B.
