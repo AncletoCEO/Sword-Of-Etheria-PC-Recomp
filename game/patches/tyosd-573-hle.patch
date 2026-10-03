@@ -58,3 +58,8 @@ Aplica con `patch -p1` desde la raíz del clon PS2Recomp.
 --- parche (2): dump del descriptor 0x30000 ---
 Ver rama sid == 0x573 en game_overrides.cpp: añade `#include <cstdio>` y
 sustituye el else generico por else-if 0x30000 con volcado de 10x16 B.
+
+--- parche (3): v0=1 + return true en rama 0x573 ---
+El EE (0x627afc: bnez v0 -> exito/0x627b14) reintentaba con v0==0
+(281 polls de rpc=0x0). Ahora la rama responde exito y salta el
+SifCallRpc real (unhandled) para este sid.
