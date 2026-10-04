@@ -1,0 +1,68 @@
+Contexto: `GSCpuBackend::DrawPrimitive`
+(`tools/PS2Recomp/ps2xRuntime/src/lib/gs/gs_cpu_backend.cpp`, ignorado por git).
+Aplica manual (tools/ no se versiona; este archivo es la copia versionada).
+Fecha: 2026-10-04. Objetivo del hito: tener algo visible.
+
+Motivo: el juego emite geometría (sprites+triángulos on-screen) pero toda
+con `rgba=(0,0,0,*)` y `tex0 tbp0=0/tme=0` → `vramNonZero=0`, pantalla negra.
+Este TRIAGE clasifica si el pipeline dibuja: negro puro → magenta.
+
+--- a/ps2xRuntime/src/lib/gs/gs_cpu_backend.cpp
++++ b/ps2xRuntime/src/lib/gs/gs_cpu_backend.cpp
+@@ DrawPrimitive: antes del switch por tipo de primitiva
++    // TRIAGE visual 2026-10-04: negro puro -> magenta (pipeline check).
++    // NO es fix real (el color real debe venir de materiales/texturas).
++    GSPrimitiveBatch visBatch = batch;
++    {
++        bool allBlack = true;
++        for (int i = 0; i < 3; ++i) {
++            if (visBatch.vertices[i].r != 0 || visBatch.vertices[i].g != 0 || visBatch.vertices[i].b != 0) {
++                allBlack = false;
++                break;
++            }
++        }
++        if (allBlack) {
++            static bool loggedVis = false;
++            if (!loggedVis) {
++                loggedVis = true;
++                std::cout << "[triage-vis] forcing black->magenta (pipeline check)" << std::endl;
++            }
++            for (int i = 0; i < 3; ++i) {
++                visBatch.vertices[i].r = 255;
++                visBatch.vertices[i].g = 0;
++                visBatch.vertices[i].b = 255;
++            }
++        }
++    }
+-    switch (state.prim.type)
++    switch (visBatch.state.prim.type)
+     {
+     case GS_PRIM_SPRITE:
+-        DrawSprite(batch);
++        DrawSprite(visBatch);
+         break;
+     case GS_PRIM_TRIANGLE:
+     case GS_PRIM_TRISTRIP:
+     case GS_PRIM_TRIFAN:
+-        DrawTriangle(batch);
++        DrawTriangle(visBatch);
+         break;
+     case GS_PRIM_LINE:
+     case GS_PRIM_LINESTRIP:
+-        DrawLine(batch);
++        DrawLine(visBatch);
+         break;
+     case GS_PRIM_POINT:
+     {
+-        const GSVertex &v = batch.vertices[0];
+-        const auto &ctx = state.context;
++        const GSVertex &v = visBatch.vertices[0];
++        const auto &ctx = visBatch.state.context;
+         ...
+-        WritePixel(state, ...);
++        WritePixel(visBatch.state, ...);
+
+Rebuild: `cmake --build work/build-game/out-linux --target ps2_runtime -j4`
++ relink `sword_etheria`; re-test y buscar `[triage-vis]` + `vramNonZero>0`
+en el log. Si aparece magenta, el pipeline dibuja y el negro es solo color/
+material pendiente (revertir triage y buscar fade/material real).
