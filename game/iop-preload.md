@@ -55,3 +55,13 @@ como red de seguridad (y el log dice `falta` o `moduleId=-1`).
 
 Overrides: directorio con override de `SWORD_IOP_DIR` (por defecto
 `work/elf/IOP/`, derivado de `cdRoot`).
+
+## Resultado 2026-10-04
+
+Cadena de 5 intentos por IRX (absoluta → `nativehost:` → `host0:`+abs →
+`host0:IOP/` → `cdrom0:/IOP/`). Los 11 cargan (`/tmp/test_rel2.txt`):
+SIO2MAN 1073741824, SIO2D 1073741825, LIBSMF2 1, LIBSD 1073741826,
+SDSTR3 2, SD_CALL 3, SDRDRV 4/start 2, PADMAN 1073741827, CDVDSTM 5/2,
+DBCMAN 1073741828, MC2_D 6/2; `TYOSD real=4`. Run gateado: `tick=2880
+gif=2 vram=0/4194304`, 130 frames, sin acks TYOSD. El binario requirió
+relink manual vía `CMakeFiles/sword_etheria.dir/link.txt`.

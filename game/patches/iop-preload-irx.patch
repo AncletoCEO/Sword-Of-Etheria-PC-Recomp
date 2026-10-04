@@ -78,7 +78,19 @@ Contexto: applies con `patch -p1` desde la raíz del clon de PS2Recomp.
 +                RUNTIME_LOG("[iop-preload] falta " << name);
 +                continue;
 +            }
-+            const auto result = runtime->loadIopModule(path.string());
++            auto result = runtime->loadIopModule(path.string());
++            if (result.moduleId <= 0) {
++                result = runtime->loadIopModule(std::string("nativehost:") + path.string());
++            }
++            if (result.moduleId <= 0) {
++                result = runtime->loadIopModule(std::string("host0:") + path.string());
++            }
++            if (result.moduleId <= 0) {
++                result = runtime->loadIopModule(std::string("host0:IOP/") + name);
++            }
++            if (result.moduleId <= 0) {
++                result = runtime->loadIopModule(std::string("cdrom0:/IOP/") + name);
++            }
 +            RUNTIME_LOG("[iop-preload] " << name << " moduleId=" << result.moduleId
 +                                              << " start=" << result.startResult);
 +            if (std::strcmp(name, "SDRDRV.IRX") == 0 && result.moduleId > 0)
@@ -102,3 +114,21 @@ Contexto: applies con `patch -p1` desde la raíz del clon de PS2Recomp.
 
 Verificación: `cmake --build work/build-game/out-linux -j4` (EXIT=0) y buscar
 `[iop-preload]` en el log del run.
+
+## Resultado 2026-10-04 (cadena multi-fallback)
+
+El intento único con ruta absoluta cruda fallaba (`failed to open IRX
+'/.../work/elf/IOP/SIO2MAN.IRX'`, `moduleId=-1`). Con la cadena de 5
+intentos (absoluta → `nativehost:` → `host0:`+abs → `host0:IOP/` →
+`cdrom0:/IOP/`) los 11 IRX obtienen `moduleId` en `/tmp/test_rel2.txt`:
+
+```
+SIO2MAN=1073741824/0  SIO2D=1073741825/0  LIBSMF2=1/0  LIBSD=1073741826/0
+SDSTR3=2/0  SD_CALL=3/0  SDRDRV=4/2  PADMAN=1073741827/0  CDVDSTM=5/2
+DBCMAN=1073741828/0  MC2_D=6/2  →  TYOSD real=4
+```
+
+`tick=2880 gif=2 vram=0/4194304 frames=130` (HLE gateado: 0 acks TYOSD,
+`rpc=0x0` x3). Nota de build: el target `sword_etheria` no relinkeaba solo
+con `cmake --build`; hizo falta rebuild de `ps2_runtime` + link directo con
+`CMakeFiles/sword_etheria.dir/link.txt`.
