@@ -55,7 +55,9 @@
 - [x] Serie de commits atomizados + push a GitHub (2026-10-03: 6 commits `9469066..3685ecb` sobre `2f49663 Initial commit`, rebase + push SSH OK a `AncletoCEO/Sword-Of-Etheria-PC-Recomp main`; ISO/ELF/`work/` 13G/`tools/` 4.2G/`ghidra-mcp/`/`mc0/`/`mc1/`/`*.log` excluidos, verificado con `git status`)
 - [ ] **Test interactivo en terminal gráfica** (PENDIENTE usuario): ejecutar `./work/build-game/out-linux/sword_etheria work/elf/SLES_537.68` desde una ventana de terminal en el entorno de escritorio para comprobar la ventana de renderizado de Raylib/GLFW, la tasa de refresco en pantalla y la respuesta a los mandos/teclado.
 - [x] Mover hacks específicos restantes al módulo de game overrides según hallazgos del test interactivo. (2026-10-03: spin `0x6e4d98` documentado en `game/6e4d98-spinwait-triage.md`; override temporal `triage6e4d98` agregado en `game_overrides.cpp` + parche versionado en `game/patches/6e4d98-triage.patch`; rebuild+retest pendientes)
-- [ ] Hito de cierre: menú + inicio de partida jugable; glitches menores se registran como limitaciones conocidas, no bloquean.
+- [x] HLE TYOSD `sid=0x573` (2026-10-03/04: `game/tyosd-573-hle.md` + `game/patches/tyosd-573-hle.patch`; rama en `sifCallRpcStub` responde `recv[0]=1`/`v0=1`; 2026-10-04: gate `g_tyosdRealModuleId` eliminado, HLE siempre activo — 622-861 acks `rpc=0x0`, `tick` 3960-5280, 147-164 frames, `gif=2` `vram=0`)
+- [x] Precarga IRX IOPRP300 (2026-10-04: `game/iop-preload.md` + `game/patches/iop-preload-irx.patch`; cadena de 5 intentos por IRX en `sceSifInitRpc`; los 11 cargan, `SDRDRV=4/2`, `TYOSD real=4`; relink manual vía `CMakeFiles/sword_etheria.dir/link.txt`)
+- [ ] Hito de cierre: menú + inicio de partida jugable; glitches menores se registran como limitaciones conocidas, no bloquean. (2026-10-04: bloqueado en spin `0x6e4d98` + poll TYOSD `rpc=0x0`; siguiente: simular `gp+0x44/gp+0x48 >= 0x41` en poll y servir `0x30000` con `SD.BIN` según descriptor de 640 B)
 
 ## Fase 5 — Publicación y release
 
