@@ -1,0 +1,27 @@
+Contexto: `IopEmulator::dispatchImport`
+(`tools/PS2Recomp/ps2xIOP/src/emulator/iop_emulator.cpp`, ignorado por git).
+Aplica manual. Fecha: 2026-10-04. Objetivo del hito: desbloquear audio.
+
+Motivo: el hilo IOP (SDRDRV, pc=0x25474) pullea `libsd:6` miles de veces;
+el fallback genérico responde `v0=0` (Missing) y nunca avanza. El EE espera
+el stream (spin `0x6e4d98`, `TYOSD rpc=0x0` eterno). Este TRIAGE responde
+`v0=1` ("done") para clasificar si desbloquea. NO es fix real.
+
+--- a/ps2xIOP/src/emulator/iop_emulator.cpp
++++ b/ps2xIOP/src/emulator/iop_emulator.cpp
+@@ dispatchImport, tras el bloque heaplib, antes de imports.resolve()
++            // TRIAGE audio 2026-10-04 (temporal): libsd:5/6/7 -> v0=1.
++            // (6 primero: pc=0x25474 miles de hits; tras HLE pasó a 5+7.)
++            if (iequals(call.library, "libsd") && (call.ordinal == 5u || call.ordinal == 6u || call.ordinal == 7u))
++            {
++                ...log "[triage-iop] libsd:5/6/7 HLE done" una vez...
++                setV0(1);
++                return ImportDisposition::Handled;
++            }
+
+Rebuild: `cmake --build work/build-game/out-linux --target ps2_iop -j4`
++ relink `sword_etheria`; smoke 30s y comparar: hits `libsd:6`,
+`tick/gif`, `vramNonZero`, histograma pc. Si SDRDRV progresa (menos polls,
+nuevos gif), el audio era el bloqueante; siguiente: HLE real de la
+función 6 (identificar por NID en LIBSD.IRX) o servir el stream.
+Si crashea o igual, revertir (v0=0 era correcto y el poll es otra cosa).

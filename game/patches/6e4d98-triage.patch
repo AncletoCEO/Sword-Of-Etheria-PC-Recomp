@@ -33,4 +33,10 @@ count fullRenderFunc 18884->18885).
 +        };
 +        runtime.replaceFunction(0x6e4d98u, triage6e4d98);
 +
++--- v2 2026-10-04 (sale real del loop; ver game/6e4d98-spinwait-triage.md) ---
++El loop sale solo si 0x638==0x63C Y byte gp+0x630==0. v1 no limpiaba el
++flag y seguía girando. v2: log con throttle (cada 200, con flag630) +
++`gp+0x630=0` antes de saltar a 0x6e4dac. O avanza (nuevos gif/VRAM) o
++crashea con pc revelador. Rebuild + smoke 30s.
++
          // Save presentation frame screenshot helper

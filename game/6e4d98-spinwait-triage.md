@@ -69,10 +69,23 @@ handler de interrupción, no por este parche.
   datos. Fix real: identificar el servidor `0x573` (módulo IRX en disco,
   `sceSifBindRpc client=0xa44020`), no este parche. Triage cumplido.
 
-1. Pegar snippet, rebuild `-j4` con `Unix Makefiles` (verificar antes que no
-   haya `cc1plus` zombies; riesgo OOM, build completo previo 1.5 GB).
-2. Re-test gráfico 3 min → `coldboot-triage.log`: ¿tick supera 5400?
-   ¿`gif>2`? ¿`vramNonZero>0`? ¿menú?
-3. Según resultado: promover a fix real en `sceGsSyncV`/`sceDmaSync` o
-   revertir triage. Hacks por juego siempre en `game_overrides.cpp`
-   (`PS2_REGISTER_GAME_OVERRIDE`), nunca en el C++ generado (se regenera).
+## Análisis del loop (2026-10-04, código generado `FUN_006cba48_p2.cpp`)
+
+Leído el dispatcher completo `0x6e4d98–0x6e4dd8`:
+
+- `0x6e4d98/0x6e4da0`: `v1=gp+0x638`, `v0=gp+0x63C` (punteros de cola).
+- `0x6e4da4 bnel`: si difieren → `s0=1`, salta a `0x6e4dbc`.
+- `0x6e4dac`: `lbu v0, gp+0x630` (flag); si `!=0` → `s0=1`.
+- `0x6e4dc0`: si callback (`gp-0x7A30`) `==0` → sin llamada; si no,
+  `jalr callback(a0=s0, a1=s2)`.
+- `0x6e4dd0 bnez s0` → vuelve a `0x6e4d98`. **Salida solo si:
+  `0x638==0x63C` Y `byte gp+0x630==0`** (cae a `0x6e4dd8 di`, sección crítica).
+- Productores que escriben `0x638/0x63C/0x630`: fragmentos
+  `entry_006e6ac4/0x6e6ac8/0x6e6ad4`, `FUN_006e6a58`, `FUN_006cc380/0x6cc400`
+  (posibles handlers de interrupción que en el recomp nunca se disparan).
+
+Conclusión: el triage v1 (igualar `a=b`) es insuficiente — falta limpiar
+`gp+0x630`. Siguiente triage v2: igualar + `gp+0x630=0` antes de saltar a
+`0x6e4dac`, loguear `flag630` por poll. Si sale del loop: o avanza a nueva
+funcionalidad (nuevos `gif`, VRAM con escena) o crashea (pc del crash dice
+dónde). Si crashea, el fix real va por el productor (VSync/DMA/SPU).
