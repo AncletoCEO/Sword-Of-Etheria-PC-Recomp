@@ -107,6 +107,38 @@ Componentes del release:
 
 MD5 del ISO (`Sword of Etheria, The (Europe) (En,Fr,De,Es,It).iso`) se determina en Fase 5 con `md5sum` y se hardcodea en `build_release.py`.
 
+## SPU2 mínima (Fase 4.6 — opción A, elegida 2026-10-04)
+
+Estado verificado que motiva esta fase (smokes 25–120s, `tick` hasta 5520):
+
+- Pipeline GS probado: triage negro→magenta, `vramNonZero=2093058/4194304`,
+  ventana magenta confirmada por el usuario.
+- Audio encadenado por HLE: `libsd:6` (2300+ polls) → `libsd:5/7` → `done`;
+  hilo IOP deja de girar; `TYOSD rpc` 43→6 por corrida.
+- Spin `0x6e4d98` sale con triage v2 (condición real: `0x638==0x63C` **y**
+  byte `gp+0x630==0`) pero macro-gira: la cola nunca se drena.
+- Anatomía de la cola (dump `[triage-buf]`, ver `game/tyosd-573-hle.md`):
+  un solo comando de sonido de 16 B (`00001101 <ptr> <count 0x40/0x41> <ptr>`,
+  familia `0x11xx`), `b = a+0x10`, `B` en ceros, callback `*(gp-0x7A30)==0`
+  (consumidor jamás instalado), productor re-encola con retry.
+- Auditoría del runtime: **sin emulación SPU2** (sin MMIO `0x1F8014xx` /
+  `0x1F900xxx`; `ps2_audio.cpp` solo arma WAV para host). Accesos EE directos
+  a registros SPU2 aún no auditados en el mapa de memoria del runtime
+  (verificar riesgo de aliasing silencioso a RDRAM antes de codificar).
+
+Plan mínimo (sin audio real; solo completar el init de sonido):
+
+1. Auditar `Load/Store` EE para `0x1F8xxxxx`: loguear accesos SPU2 del juego
+   y decidir stub (aceptar + estado plausible) vs alias (corregir mapa).
+2. Modelo SPU2 mínimo: registros core/voice + `transfer-complete`, sin
+   síntesis; el estado debe mostrar "done" para que SDRDRV complete.
+3. Semántica real de `libsd:4/5/7/9/11/23` desde los exports de
+   `work/elf/IOP/LIBSD.IRX` (reemplaza los `v0=1` de triage uno por uno).
+4. Servir `SD.BIN` (683 MB en `work/elf/`) según el comando de 16 B una vez
+   conocido su layout (destino guest + tamaño; hoy sin verificar).
+5. Drenar la cola (`gif>2` sostenido, VRAM con escena sin `triage-vis`),
+   revertir triages y cerrar hito con menú.
+
 ## Validation
 
 - **Fase 0**: `git --version`, `cmake --version` (>= 3.20), `cl` (MSVC C++20)
@@ -119,6 +151,9 @@ MD5 del ISO (`Sword of Etheria, The (Europe) (En,Fr,De,Es,It).iso`) se determina
 - **Fase 4 (jugabilidad basica)**: el ejecutable arranca el juego desde frio y
   alcanza jugabilidad basica (menu + inicio de partida). Glitches menores de
   graficos/audio no bloquean el cierre; se registran como limitaciones conocidas.
+- **Fase 4.6 (SPU2 mínima)**: `gif>2` sostenido en smoke 30s, VRAM con escena
+  sin `triage-vis`, cola de sonido drenada (`a==b` estable con callback
+  instalado o completitud señalada) y triages de audio revertidos a HLE real.
 - **Fase 5 (release)**: `build_release.py` rechaza ISOs con MD5 incorrecto; acepta el ISO PAL Europa conocido y produce un binario funcional. GitHub Actions genera los artefactos de Windows y Linux sin errores. El README explica el proceso sin ambiguedades legales.
 - **Cierre**: `specs/` no aplica (este change no modifica comportamiento
   especificado de ningun software del repo; produce un build externo), y los

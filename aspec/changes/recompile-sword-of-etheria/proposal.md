@@ -47,6 +47,7 @@ In:
 - Ciclo de iteración sobre stubs hasta un build jugable básico.
 - Documentación del proceso en este change.
 - Script `build_release.py` que verifica el MD5 del ISO del usuario y compila el ejecutable final para Windows o Linux.
+- Emulación SPU2 mínima (registros + `transfer-complete`, sin audio real) necesaria para que el init de sonido complete y el juego salga del spin `0x6e4d98` (opción A elegida 2026-10-04; detalle en `design.md` Fase 4.6).
 - GitHub Actions CI para compilar y publicar releases de Windows y Linux automáticamente al hacer tag.
 - `README.md` con instrucciones claras de uso (el usuario aporta su ISO, el script verifica el hash y genera el juego).
 
@@ -55,7 +56,8 @@ Out:
 - Modificar contenido, assets o lógica del juego más allá de los hooks/stubs
   necesarios para que arranque.
 - Corrección de todos los bugs gráficos/sonoros o de rendimiento del runtime
-  (limitación propia de PS2Recomp, fuera de nuestro control).
+  (limitación propia de PS2Recomp, fuera de nuestro control), salvo la SPU2
+  mínima de arranque definida en el In.
 - **Distribución del ISO, del ELF o de ningún archivo con copyright** — el release solo contiene el ejecutable compilado desde el código recompilado abierto, nunca assets del juego.
 
 ## Risks

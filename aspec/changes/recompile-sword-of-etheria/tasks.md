@@ -59,6 +59,14 @@
 - [x] Precarga IRX IOPRP300 (2026-10-04: `game/iop-preload.md` + `game/patches/iop-preload-irx.patch`; cadena de 5 intentos por IRX en `sceSifInitRpc`; los 11 cargan, `SDRDRV=4/2`, `TYOSD real=4`; relink manual vía `CMakeFiles/sword_etheria.dir/link.txt`)
 - [ ] Hito de cierre: menú + inicio de partida jugable; glitches menores se registran como limitaciones conocidas, no bloquean. (2026-10-04: magenta en ventana confirma pipeline; audio desbloqueado por etapas `libsd:6→5/7→done`, spin v2 sale del loop pero macro-gira; dump revela 1 comando sonido 16 B eterno con `cb==0` sin consumidor y runtime sin SPU2 —vías: emular SPU2 o cazar consumidor en Ghidra; parked limpio tick 1440 `gif=2`)
 
+## Fase 4.6 — SPU2 mínima (opción A, 2026-10-04; detalle en `design.md`)
+
+- [ ] Auditar path MMIO SPU2 en EE: localizar `Load/Store` del runtime para `0x1F8xxxxx`, loguear accesos del juego y decidir stub vs corrección de alias a RDRAM
+- [ ] Modelo SPU2 mínimo: registros core/voice + `transfer-complete` sin síntesis; verificar que SDRDRV completa init (bajan polls `libsd`, sube `dma`)
+- [ ] Semántica real `libsd:4/5/7/9/11/23` desde exports de `work/elf/IOP/LIBSD.IRX`; reemplaza los `v0=1` de triage uno por uno con rebuild+smoke cada uno
+- [ ] Servir `SD.BIN` según comando de 16 B una vez conocido su layout (destino guest + tamaño); verificar datos en destino y avance de cola (`a==b` estable)
+- [ ] Drenar cola y revertir triages (`triage-vis`, `triage6e4d98`, `libsd→v0=1`): `gif>2` sostenido, VRAM con escena sin magenta, menú visible; recién ahí tag `v0.1.0`
+
 ## Fase 5 — Publicación y release
 
 - [x] Calcular MD5 del ISO PAL Europa: `md5sum "Sword of Etheria, The (Europe) (En,Fr,De,Es,It).iso"` y registrarlo aquí y en `build_release.py` (2026-10-03: `b9c5115b77b7f05fbf14a67df8d3f99d`)
