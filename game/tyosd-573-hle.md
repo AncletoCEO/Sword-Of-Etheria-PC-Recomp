@@ -38,6 +38,22 @@ frames. Bloqueo persiste (`0x6e4d98`, `flag5D0` oscila). Siguiente:
 `rpc==0x0` debe simular contadores `gp+0x44/gp+0x48 >= 0x41` y `0x30000`
 servir `SD.BIN` según descriptor.
 
+## Anatomía de la cola (2026-10-04, dump `[triage-buf]`)
+
+- `cb = *(gp-0x7A30) = 0x0` siempre: **no hay consumidor instalado**.
+- `b = a+0x10` siempre: **un solo comando de 16 B pendiente**, eterno.
+- Contenido `A`: `00001101 <ptr> 00000040/41 <ptr>` (familia `0x11xx` como
+  el descriptor `0x30000`: cola de comandos de sonido hacia SPU2).
+- `A` alterna entre `0xb15a80` (count `0x40`) y `0xa96680` (`0x41`):
+  doble buffer; el productor re-encola el mismo comando (retry con
+  incremento) porque nunca se señala completitud.
+- `B` siempre ceros: el productor nunca escribe datos nuevos.
+- Runtime **sin emulación SPU2** (sin MMIO `0x1F8014xx/0x1F900xxx`;
+  `ps2_audio.cpp` solo arma WAV para host): el comando no puede
+  completarse por la vía real. Vías: (a) emular SPU2 (grande);
+  (b) cazar en Ghidra quién instala el consumidor (`gp-0x7A30`) y qué
+  formato espera el comando de 16 B para drenarlo a mano (mediano).
+
 ## Iteración 2026-10-04 (poll-progress, TRIAGE)
 
 Parche: `game/patches/tyosd-573-poll-progress.patch`.
