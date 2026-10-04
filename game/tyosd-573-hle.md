@@ -37,3 +37,17 @@ vram=0/4194304`, `rpc=0x0` x625, `TYOSD] ack` x622, 147 frames.
 frames. Bloqueo persiste (`0x6e4d98`, `flag5D0` oscila). Siguiente:
 `rpc==0x0` debe simular contadores `gp+0x44/gp+0x48 >= 0x41` y `0x30000`
 servir `SD.BIN` según descriptor.
+
+## Iteración 2026-10-04 (poll-progress, TRIAGE)
+
+Parche: `game/patches/tyosd-573-poll-progress.patch`.
+
+- `rpc==0x0`: incremento gradual `gp+0x44→0x21`, `gp+0x48→0x20`
+  (suma `0x41`) por poll, con log cada 200 (`[TYOSD-poll] progress`).
+  Clasifica si el consumidor sale del spin; no es fix real.
+- `rpc==0x30000`: dump completo 640 B (40 filas `[TYOSD-desc+N]`) una
+  sola vez; sigue sin copiar datos de `SD.BIN` (layout sin verificar,
+  riesgo RDRAM).
+- Rebuild pendiente: `ps2_runtime -j4` + relink `sword_etheria`; re-test
+  25s y verificar `progress` + descriptor completo antes de diseñar el
+  serve real (lsn/count/destino guest, recv 352 B).
