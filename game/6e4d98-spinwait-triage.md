@@ -89,3 +89,12 @@ Conclusión: el triage v1 (igualar `a=b`) es insuficiente — falta limpiar
 `0x6e4dac`, loguear `flag630` por poll. Si sale del loop: o avanza a nueva
 funcionalidad (nuevos `gif`, VRAM con escena) o crashea (pc del crash dice
 dónde). Si crashea, el fix real va por el productor (VSync/DMA/SPU).
+
+## Poller hambriento (2026-10-04, `FUN_006e6a58`)
+
+El poller `0x6e6a58-0x6e6b2c` retorna de entrada si `byte gp+0x640==0`
+(`0x6e6a5c beqz` hacia `0x6e6b28`), sin llamar jamas al worker `0x6e4cc0`.
+Medido `flag640=0` estable: worker hambriento, 1 item pendiente eterno.
+Triage v3: el override del spin levanta tambien `gp+0x640=1` (igual que
+se hizo con `0x630`). Verificar en smoke: presencia del poller en el
+histograma pc, drenado de cola (`a/b` cambian), `gif>2`.

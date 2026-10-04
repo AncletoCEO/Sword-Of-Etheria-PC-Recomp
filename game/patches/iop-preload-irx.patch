@@ -132,3 +132,17 @@ DBCMAN=1073741828/0  MC2_D=6/2  →  TYOSD real=4
 `rpc=0x0` x3). Nota de build: el target `sword_etheria` no relinkeaba solo
 con `cmake --build`; hizo falta rebuild de `ps2_runtime` + link directo con
 `CMakeFiles/sword_etheria.dir/link.txt`.
+## v2 2026-10-04 (LIBSD físico preferido; tarea 3 libsd real)
+
+Hallazgo: la cadena se detenía en el HLE (id >= 0x40000000) sin probar el
+IRX físico, así que LIBSD.IRX quedaba en HLE y sus 34 exports reales
+(v0x105, verificados por parseo offline del ELF) nunca se registraban →
+`libsd:*` siempre Missing. Cambio: tras la cadena, si el módulo es
+LIBSD.IRX y el id es HLE (o falló), se reintenta `cdrom0:/IOP/LIBSD.IRX`
+y se conserva si el id resultante es físico (< 0x40000000); si no,
+queda el HLE (fallback seguro, sin doble carga: el físico solo se
+conserva cuando la cadena no ya lo logró).
+En `iop_emulator.cpp` el stub `libsd:5/6/7` ahora prefiere el export
+registrado (JumpToGuest al código Sony) y solo responde `v0=1` si no hay
+registro. Smoke 30s: buscar `LIBSD.IRX moduleId=<chico>` + `start`,
+ausencia de `triage-iop`, y marcadores EE (`tick/gif`/VRAM/spin).

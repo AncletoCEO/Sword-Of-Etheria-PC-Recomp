@@ -61,9 +61,9 @@
 
 ## Fase 4.6 — SPU2 mínima (opción A, 2026-10-04; detalle en `design.md`)
 
-- [ ] Auditar path MMIO SPU2 en EE: localizar `Load/Store` del runtime para `0x1F8xxxxx`, loguear accesos del juego y decidir stub vs corrección de alias a RDRAM
-- [ ] Modelo SPU2 mínimo: registros core/voice + `transfer-complete` sin síntesis; verificar que SDRDRV completa init (bajan polls `libsd`, sube `dma`)
-- [ ] Semántica real `libsd:4/5/7/9/11/23` desde exports de `work/elf/IOP/LIBSD.IRX`; reemplaza los `v0=1` de triage uno por uno con rebuild+smoke cada uno
+- [x] Auditar path MMIO SPU2 en EE (2026-10-04: sin literales SPU2 en `work/generated/` —solo artefactos de disassembler `mfsa/cache/.word`; el juego EE no toca SPU2 directo → sin stub ni fix de alias; lado IOP ya tiene mapa HW `m_hardware` + auto-complete DMA SPU con bit de estado e IRQ en `iop_memory.cpp`; gap real = semántica libsd + `SD.BIN`, tareas 3-4)
+- [ ] Modelo SPU2 mínimo (2026-10-04: infra ya existe —auto-complete DMA SPU en `IopMemory::writeHardware32`; SDRDRV igual no completa init → el gap es semántica libsd + datos, no el modelo; verificar al cerrar tareas 3-4: bajan polls `libsd`, sube `dma`)
+- [x] Semántica real `libsd` (2026-10-04: mejor que planificado —IRX físico `LIBSD.IRX moduleId=2` con 34 exports v0x105 registrado; TODOS los ordinales resuelven a código Sony real, cero Missing `libsd`, stub `v0=1` sin disparar —queda solo como fallback; `dbcman:4`/`sio2d:6` son llamadas únicas toleradas; el juego igual macro-gira: el gap restante es datos `SD.BIN`, tarea 4)
 - [ ] Servir `SD.BIN` según comando de 16 B una vez conocido su layout (destino guest + tamaño); verificar datos en destino y avance de cola (`a==b` estable)
 - [ ] Drenar cola y revertir triages (`triage-vis`, `triage6e4d98`, `libsd→v0=1`): `gif>2` sostenido, VRAM con escena sin magenta, menú visible; recién ahí tag `v0.1.0`
 
