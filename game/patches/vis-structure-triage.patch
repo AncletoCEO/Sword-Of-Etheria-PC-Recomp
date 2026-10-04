@@ -1,0 +1,38 @@
+Contexto: `GSCpuBackend::DrawPrimitive`
+(`tools/PS2Recomp/ps2xRuntime/src/lib/gs/gs_cpu_backend.cpp`, ignorado por git).
+Fecha: 2026-10-04. Usuario confirma pantalla magenta con triage v1.
+
+Cambio v2 (estructura): sprites negros (GS_PRIM_SPRITE==6, probable
+fade/clear) se saltan con `return`; triángulos/trifans negros se sombrean
+por posición (r=x>>2, g=y>>2, b=160) para revelar escena. NO es fix real.
+
+--- a/ps2xRuntime/src/lib/gs/gs_cpu_backend.cpp
++++ b/ps2xRuntime/src/lib/gs/gs_cpu_backend.cpp
+@@ DrawPrimitive, reemplaza bloque [triage-vis] por [triage-vis2]
++    // TRIAGE visual 2026-10-04b: skip black sprites, gradient triangles.
++    GSPrimitiveBatch visBatch = batch;
++    {
++        bool allBlack = true;
++        for (int i = 0; i < 3; ++i) {
++            if (visBatch.vertices[i].r != 0 || visBatch.vertices[i].g != 0 || visBatch.vertices[i].b != 0) {
++                allBlack = false;
++                break;
++            }
++        }
++        if (allBlack) {
++            ... log "[triage-vis2] ..." una vez ...
++            const uint32_t ptype = static_cast<uint32_t>(visBatch.state.prim.type);
++            if (ptype == 6u) {
++                return;
++            }
++            for (int i = 0; i < 3; ++i) {
++                visBatch.vertices[i].r = (x >> 2) & 0xFF;
++                visBatch.vertices[i].g = (y >> 2) & 0xFF;
++                visBatch.vertices[i].b = 160;
++            }
++        }
++    }
+
+Rebuild + re-test: buscar `[triage-vis2]` y `vramNonZero>0`; usuario debe
+ver formas degradadas en vez de magenta plano. Si hay escena, el negro era
+fade/material; siguiente: localizar valor de fade o color real (revertir).
