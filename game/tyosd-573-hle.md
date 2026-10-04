@@ -26,3 +26,14 @@ nunca recibe datos → pantalla negra.
 
 `game/patches/tyosd-573-hle.patch`. Rebuild incremental `ps2_runtime` +
 relink y re-test gráfico (buscar `[TYOSD]` en el log).
+
+## Resultado 2026-10-04 (HLE siempre activo)
+
+Se eliminó el gate `g_tyosdRealModuleId <= 0`: el HLE atiende `0x573`
+aunque `SDRDRV.IRX` esté cargado (moduleId=4), porque el driver real no
+responde `rpc=0x0`. `/tmp/test_hle.txt` (90s): `tick=3960 gif=2
+vram=0/4194304`, `rpc=0x0` x625, `TYOSD] ack` x622, 147 frames.
+`/tmp/test_hle2.txt` (150s): `tick=5280`, 864 polls, 861 acks, 164
+frames. Bloqueo persiste (`0x6e4d98`, `flag5D0` oscila). Siguiente:
+`rpc==0x0` debe simular contadores `gp+0x44/gp+0x48 >= 0x41` y `0x30000`
+servir `SD.BIN` según descriptor.

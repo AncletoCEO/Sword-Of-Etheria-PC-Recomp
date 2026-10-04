@@ -67,3 +67,12 @@ SifCallRpc real (unhandled) para este sid.
 --- parche (4): dump recv del poll 0x0 (una vez) + gp+0x44/48 ---
 Ver rama sid == 0x573: el loop de poll no depende de v0 (v0=1 no
 cambia nada: 278 polls, gif=2). Hay que ver que condicion espera.
+
+--- parche (5) 2026-10-04: HLE siempre activo (sin gate por driver real) ---
+Se quita `&& g_tyosdRealModuleId <= 0` de la rama `sid == 0x573`: aunque
+`SDRDRV.IRX` cargue (moduleId=4), el driver real no atiende `rpc=0x0` y el
+EE sigue en el spin `0x6e4d98`. Con HLE siempre activo: 622-861 acks
+`TYOSD] rpc=0x0`, `tick` 3960-5280, 147-164 frames, pero `gif=2`
+`vram=0` (bloqueo persiste). Siguiente paso: en `rpc==0x0` simular
+progreso (`gp+0x44/gp+0x48`, condición `< 0x41`) y servir `0x30000` con
+datos de `SD.BIN` según descriptor de 640 B.
