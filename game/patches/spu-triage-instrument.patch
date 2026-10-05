@@ -1,0 +1,29 @@
+Instrumentación TRIAGE SPU (2026-10-04, jugable-primero; temporal, revertir
+antes del release). Archivos en `tools/` (ignorados por git); este archivo
+es la copia versionada. Objetivo: encontrar la señal de completitud que
+SDRDRV/LIBSD esperan (cola EE de 16 B con `cb==0`, macro-spin `0x6e4d98`).
+
+1. `ps2xIOP/src/emulator/core/iop_memory.cpp`
+   - `readHardware32`: loguea lecturas en `[Spu2Base, Spu2End)` =
+     `[0x1F900000, 0x1FA00000)`: 3 primeras + cada 2000 (`total=`).
+   - `writeHardware32`: idem escrituras (3 primeras por dirección).
+   - Rama DMA (CHCR `0x1F8010C8/0x1F801508` + start): loguea arranques
+     (5 primeros + cada 200).
+2. `ps2xIOP/src/emulator/imports/iop_cdvd.cpp`
+   - `readSectors`: loguea `lsn/sectors/dst` (5 primeros + cada 500).
+3. `ps2xIOP/src/emulator/iop_emulator.cpp`
+   - Stub `libsd:5/6/7`: prefiere export registrado (código Sony real),
+     fallback `v0=1`; loguea primer salto a real por ordinal con `ra`.
+   - Warning `unhandled import`: agrega `ra=` (llamador).
+
+Hallazgos (smokes 30-120s, `tick` hasta 5520, `gif=2`):
+- Barridos de init (ceros) + setup de voces (`0x3fff/0xff` en
+  `0x1F900004/014/024/034/044`); lecturas en 61+ direcciones sin hot poll
+  visible; **cero arranques DMA SPU**; 1 sola lectura IOP CDVD
+  (`lsn=1821047`, sector de SD.BIN → RAM IOP).
+- Ningún módulo IRX ni el ELF EE contiene literales SPU2 (`lui`): el origen
+  del tráfico SPU se construye por punteros (pendiente identificar).
+
+Rebuild: `cmake --build work/build-game/out-linux --target ps2_iop -j4`
++ relink `sword_etheria`; smokes a `/tmp/opencode/*.log` (no `/tmp/`,
+volátil entre sesiones).

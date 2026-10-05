@@ -139,6 +139,48 @@ Plan mínimo (sin audio real; solo completar el init de sonido):
 5. Drenar la cola (`gif>2` sostenido, VRAM con escena sin `triage-vis`),
    revertir triages y cerrar hito con menú.
 
+## Investigación comparada (2026-10-04, previa a codificar SPU2)
+
+Fuentes: OpenGOAL (docs + PR #3804), UnleashedRecomp (`apu/`, XMA+FFmpeg),
+Zelda64Recomp (`RECOMP_PATCH` + API bridge), ps2sdk (`spu2regs.h`, FREESD),
+PCSX2 (`SPU2/spu2sys.cpp`, `regs.h`), lista awesome-game-decompilations
+(son receptorios de decompilación; PS2 casi ausente salvo casos puntuales).
+
+Ideas frescas aplicables, en orden de coste:
+
+1. **Completitud síncrona (OpenGOAL PR #3804)**: correr el handler de
+   interrupción DMA "inmediatamente", para que desde el juego siempre haya
+   otro buffer SPU disponible y el grueso del código de streaming nunca tenga
+   que correr. Equivalente nuestro: el auto-complete DMA ya existe en
+   `IopMemory::writeHardware32`; falta que el DMA **arranque** (cero
+   arranques observados) o que su IRQ llegue al waiter.
+2. **HLE a nivel frame, no muestra (UnleashedRecomp `apu/`)**: el juego
+   entrega PCM por frames (`SubmitFrames`) y el runtime los reproduce;
+   decodificación con FFmpeg. Equivalente nuestro: el runtime YA tiene
+   `ps2_audio_vag.cpp` (decode VAG→PCM) + `PS2AudioBackend::play`; solo falta
+   alimentar `SD.BIN` → decode → `play` (hoy nadie llama a esa cadena).
+3. **Parche mínimo no invasivo (Zelda64Recomp `sound_patches.c`)**: una
+   multiplicación/condicional en el path original. Valida nuestro patrón
+   `game_overrides.cpp` + `game/patches/` (no reescribir sistemas).
+4. **Mapa SPU2 exacto (ps2sdk `spu2regs.h`)**: base IOP `0xBF900000`
+   (física `0x1F900000`), cores a `0x400`; `ENDX` en `0x340+core*0x400`,
+   `STATX` en `0x344+core*0x400`; DMA `0xBF8010C0+ch*1088`, start bit 24.
+   Nuestras direcciones observadas calzan (`0x1F900004` voces,
+   `0x1F900344` status, `0x1F9007C0/7C8` SPDIF).
+5. **Valores de boot HW ("PS2 confirmed", PCSX2 `spu2sys.cpp`)**:
+   `ENDX=0xFFFFFF` y `STATX=0x80` por core al arrancar. Nuestro stub
+   devolvía 0 en todo → las voces "nunca terminan". Fix inmediato:
+   pre-poblar esos 4 registros en `IopMemory::reset()` (hecho 2026-10-04;
+   verificar en smoke si LIBSD avanza; si el init los pone a cero y espera
+   al HW, endurecer a lectura-siempre-`0xFFFFFF` estilo PCSX2).
+6. **FREESD (ps2sdk, driver compatible con LIBSD + fuente)**: si algún
+   ordinal `libsd` necesita semántica exacta, su fuente es la referencia
+   (antes que adivinar valores de retorno).
+7. **Parappa2 (`wavep2` streaming + `tapctrl` voces)**: confirma la
+   arquitectura en dos módulos (feeder + voces), igual que
+   CDVDSTM vs SDRDRV/LIBSD aquí. El atasco vive del lado feeder/dato,
+   no del consumidor EE.
+
 ## Validation
 
 - **Fase 0**: `git --version`, `cmake --version` (>= 3.20), `cl` (MSVC C++20)

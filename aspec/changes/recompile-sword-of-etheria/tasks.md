@@ -62,7 +62,7 @@
 ## Fase 4.6 — SPU2 mínima (opción A, 2026-10-04; detalle en `design.md`)
 
 - [x] Auditar path MMIO SPU2 en EE (2026-10-04: sin literales SPU2 en `work/generated/` —solo artefactos de disassembler `mfsa/cache/.word`; el juego EE no toca SPU2 directo → sin stub ni fix de alias; lado IOP ya tiene mapa HW `m_hardware` + auto-complete DMA SPU con bit de estado e IRQ en `iop_memory.cpp`; gap real = semántica libsd + `SD.BIN`, tareas 3-4)
-- [ ] Modelo SPU2 mínimo (2026-10-04: infra ya existe —auto-complete DMA SPU en `IopMemory::writeHardware32`; SDRDRV igual no completa init → el gap es semántica libsd + datos, no el modelo; verificar al cerrar tareas 3-4: bajan polls `libsd`, sube `dma`)
+- [ ] Modelo SPU2 mínimo (2026-10-04: infra ya existe —auto-complete DMA SPU en `IopMemory::writeHardware32`; 2026-10-04 investigación: pre-poblar boot HW `ENDX=0xFFFFFF`+`STATX=0x80` por core según PCSX2/ps2sdk; verificar en smoke si LIBSD avanza —bajan polls, sube `dma`— y si no, endurecer ENDX a lectura-siempre-lleno)
 - [x] Semántica real `libsd` (2026-10-04: mejor que planificado —IRX físico `LIBSD.IRX moduleId=2` con 34 exports v0x105 registrado; TODOS los ordinales resuelven a código Sony real, cero Missing `libsd`, stub `v0=1` sin disparar —queda solo como fallback; `dbcman:4`/`sio2d:6` son llamadas únicas toleradas; el juego igual macro-gira: el gap restante es datos `SD.BIN`, tarea 4)
 - [ ] Servir `SD.BIN` según comando de 16 B una vez conocido su layout (destino guest + tamaño); verificar datos en destino y avance de cola (`a==b` estable)
 - [ ] Drenar cola y revertir triages (`triage-vis`, `triage6e4d98`, `libsd→v0=1`): `gif>2` sostenido, VRAM con escena sin magenta, menú visible; recién ahí tag `v0.1.0`
