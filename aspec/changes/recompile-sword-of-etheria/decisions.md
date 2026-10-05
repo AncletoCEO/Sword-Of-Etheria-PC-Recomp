@@ -5,6 +5,12 @@ Actualizar con cada decisión tomada. Estado de tareas: ver `tasks.md`
 (38/44 al 2026-10-05 noche). Principios vigentes (memoria del repo):
 `release-playable-first`, `autonomy-until-playable`.
 
+> **LEER PRIMERO — Auditoría externa 2026-10-05 (sección al final del archivo).**
+> Análisis de solo-lectura del repo versionado. Enfoques a corregir; bloquea
+> cierre / release `v0.1.0` hasta resolver **A1** (runtime no versionado),
+> **A2** (dos builds divergentes) y **A6** (release/CI no valida). No ejecutar
+> nada sobre `work/` sin leerla.
+
 ## Contexto técnico (estable)
 
 - Juego: `SLES_537.68` (entry `0x004C0008`, stripped), ISO PAL Europa
@@ -140,9 +146,106 @@ Actualizar con cada decisión tomada. Estado de tareas: ver `tasks.md`
 - `game/smoke_report.py`: smoke + veredicto (TRANSFER/POLL-STORM/etc.).
   Extenderlo antes que grep manual.
 
+## Auditoría externa (2026-10-05) — enfoques a corregir
+
+Análisis de solo-lectura del repo versionado (36 commits). Ordenado por
+gravedad. **Bloquea cierre / release `v0.1.0` hasta resolver al menos A1, A2 y
+A6.** Ninguna acción de esta sección se ejecutó.
+
+### A1 — Reproducibilidad rota: el runtime real no está versionado (crítico)
+
+- El trabajo que hace avanzar el juego (162 syscall stubs, redirect
+  `fullRenderFunc`, HLE TYOSD, precarga IRX, híbridos y triages) vive en
+  `tools/PS2Recomp/ps2xRuntime/src/lib/game_overrides.cpp`, y `tools/` está en
+  `.gitignore`.
+- En el repo solo quedan fragmentos narrativos en `game/patches/*.patch`:
+  **ningún script los aplica** (no hay `git apply`/`patch -p1` en
+  `build_release.py` ni en `.github/workflows/release.yml`).
+- `README.md` afirma que el runtime "incluye `game_overrides.cpp` (162 syscall
+  stubs + hooks)": eso no está en el repo.
+- **Consecuencia**: un clon limpio + `build_release.py` compila un runtime
+  stock, sin nada del avance reciente.
+- **Acción**: versionar como parches aplicables (`git format-patch` del
+  submódulo o fork de `ps2xRuntime` dentro del repo) y que
+  `build_release.py`/CI los apliquen ANTES de cualquier validación.
+
+### A2 — Dos builds divergentes (`game/` vs `work/build-game/`)
+
+- El flujo de dev compila `work/build-game/` (ignorado) y exige `cp` manual
+  desde `game/` (ver "Lecciones operativas"); `build_release.py:120` compila
+  `game/`. Son dos `CMakeLists.txt`/`game_main.cpp` que divergen.
+- **Acción**: una sola fuente de verdad. O `game/` es el build (dev y release),
+  o `work/build-game/` se genera por script desde `game/`.
+
+### A3 — Paths duros y stale (portabilidad)
+
+- `game/game_main.cpp:89` → `/home/lubonch/repos/.../sword_etheria.log`: el tee
+  de log corre siempre en Linux; si el dir no existe, **el log a archivo se
+  pierde en silencio**.
+- `game/game_main.cpp:250` → default boot ELF con path duro `/home/lubonch/...`.
+- `config-linux.toml:10-12` → `/home/lubonch/Repos/...` (mayúscula; no existe).
+- `continue-on-arch.md`/`README.md` afirman "sin paths duros": falso.
+- **Acción**: derivar de `argv`/CMake/env; sin paths absolutos de máquina en
+  código versionado.
+
+### A4 — Estrategia: parchear síntomas en vez de completar el entorno
+
+- Regla de la skill PS2Recomp: "95% de los casos es el entorno" y "nunca
+  parchear síntomas". Acá se encadenaron triages (v1/v2/v3/v6,
+  `poll-progress`, `triage-vis`, híbrido `0x30000`) y varios se reconocen
+  "inertes por construcción" (ver "Corrección de modelo" arriba).
+- `smoke_report.py` reporta "TRANSFER (estable)" como progreso aunque la cola
+  siga sin drenar.
+- **Acción**: no sumar más triages. Decidir el consumidor real vía A/B con
+  PCSX2 (DebugServer) o modelar el ciclo de voz SPU2 completo
+  (KeyOn→playing→ENDX); no forzar ENVX a ciegas ni `v0=1`.
+
+### A5 — `replaceFunction` a mitad de función
+
+- `game/patches/6e4d98-triage.patch` engancha `0x6e4d98` (mitad de `0x6e4cc0`)
+  y admite que "puede corromper registros/stack". El fix real va por el
+  productor/entorno, no por reemplazo de instrucciones sueltas.
+
+### A6 — El release/CI no valida nada (crítico para el hito)
+
+- `release.yml` solo compila PS2Recomp, corre `py_compile`/`--help` y empaqueta
+  tools + 4 archivos. No compila el juego, no aplica patches, no corre smoke.
+  El asset de `v0.1.0` no arranca el juego.
+- `build_release.py:107` y `config-linux.toml` inyectan un parche de
+  instrucción crudo en `0x4c008c` (`j 0x4c0218`) para saltar el spin del
+  bootstrap: hack de arranque atado a este ELF, no entorno.
+- **Acción**: no taggear `v0.1.0` hasta menú visible; el CI debe fallar si el
+  asset no es ejecutable/funcional.
+
+### A7 — Menores
+
+- `build_release.py:121` pasa `-DCMAKE_BUILD_TYPE=Release`, pero
+  `game/CMakeLists.txt:116` fuerza `-O0 -fno-inline -fno-stack-protector -g0`
+  (`/Od /GS-` en MSVC): "Release" nominal.
+- `game/CMakeLists.txt:92` imprime "Archivos >10MB fuera de unity" pero el
+  umbral real es 2 MB (`src_size GREATER 2000000`).
+- `split_monsters.py` transforma C++ generado con regex, sin tests: frágil ante
+  cambios de `ps2_recomp`.
+- `decisions.md` dice "38/44" y `tasks.md` tiene el hito sin cerrar: bitácora y
+  tasks no coinciden.
+- `searchMemory` no devuelve nada y `.ancleto/memory.db` está vacío: los
+  principios citados ("release-playable-first") no están en la memoria del repo.
+- No hay evidencia de A/B con PCSX2.
+
+### Lo que está bien (preservar)
+
+- Diagnóstico del IOP vacío → precarga de IRX (arreglar el entorno, no síntoma).
+- Regla "splitter siempre tras `ps2_recomp`", implementada en
+  `build_release.py:118`.
+- Higiene `[PS2]`/`[NO-PS2]`; `smoke_report.py` estandarizado.
+
 ## Preguntas abiertas (mañana)
 1. Fix quirúrgico ENVX voces 18-23 (¿envolvente llena las desbloquea?).
 2. Si no: modelo de ciclo de voz (KeyOn→ENDX) mínimo.
 3. Servir `SD.BIN` en bulk cuando el layout del comando de 16 B se conozca
    (tarea 4.6-4).
 4. Revertir triages al drenar (tarea 4.6-5) → menú → tag `v0.1.0`.
+
+> **Bloqueantes nuevos (auditoría 2026-10-05), previos a 1-4:** resolver A1
+> (versionar el runtime), A2 (unificar build) y A6 (CI/release). Sin A1 no hay
+> forma de reproducir el estado actual desde el repo.
