@@ -67,6 +67,10 @@
 - [ ] Servir `SD.BIN` según comando de 16 B una vez conocido su layout (destino guest + tamaño); verificar datos en destino y avance de cola (`a==b` estable)
 - [ ] Drenar cola y revertir triages (`triage-vis`, `triage6e4d98`, `libsd→v0=1`): `gif>2` sostenido, VRAM con escena sin magenta, menú visible; recién ahí tag `v0.1.0`
 
+## Herramientas de debug (2026-10-05)
+
+- [x] `game/smoke_report.py`: corre el binario con timeout y resume tick/gif/VRAM, modo audio (polls vs transfers), spin `0x6e4d98`, unhandled imports, triages y causa de salida con veredicto (verificado 2026-10-05: corrida 30s → TRANSFER correcto)
+
 ## Fase 5 — Publicación y release
 
 - [x] Calcular MD5 del ISO PAL Europa: `md5sum "Sword of Etheria, The (Europe) (En,Fr,De,Es,It).iso"` y registrarlo aquí y en `build_release.py` (2026-10-03: `b9c5115b77b7f05fbf14a67df8d3f99d`)
