@@ -98,3 +98,20 @@ Medido `flag640=0` estable: worker hambriento, 1 item pendiente eterno.
 Triage v3: el override del spin levanta tambien `gp+0x640=1` (igual que
 se hizo con `0x630`). Verificar en smoke: presencia del poller en el
 histograma pc, drenado de cola (`a/b` cambian), `gif>2`.
+
+## Correccion de modelo (2026-10-05): el ping-pong es artefacto del triage
+
+- El poller SI es llamado desde el flujo principal (`jal func_6E6A58`
+  en `0x6e7ec8`, chequea flag en `0x6e7ed0` tras volver). Corre por
+  iteracion pero retorna al instante (`flag640==0`).
+- La salida del spin (`0x6e4df4+`) lee una TABLA (`s1=gp+0x5F8`,
+  indice `gp+0x604`) y republica `0x63C/0x638` desde ella: la alternancia
+  `a/b` entre visitas es el flip normal, NO drenado real. Sin triage el
+  spin se queda en el PRIMER item.
+- Triage v6 (poner en cero los 16 B del item): sin efecto - el flip
+  republica desde la tabla de todos modos; el productor re-escribe el
+  item cada ronda independiente del contenido.
+- Conclusion: UN solo comando de audio pendiente desde el init, cuyo
+  productor espera senal de completitud SPU (no contenido). El consumidor
+  (`cb==0`) jamas se instala porque esa senal nunca llega. Siguiente:
+  waiter exacto de SDRDRV o trazar escrituras a `gp+0x63C` con pc.
