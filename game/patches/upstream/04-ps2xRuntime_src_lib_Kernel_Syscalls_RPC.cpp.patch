@@ -1,0 +1,15 @@
+diff --git a/ps2xRuntime/src/lib/Kernel/Syscalls/RPC.cpp b/ps2xRuntime/src/lib/Kernel/Syscalls/RPC.cpp
+index 07fcd29..d3e9fd0 100644
+--- a/ps2xRuntime/src/lib/Kernel/Syscalls/RPC.cpp
++++ b/ps2xRuntime/src/lib/Kernel/Syscalls/RPC.cpp
+@@ -648,6 +648,10 @@ namespace ps2_syscalls
+             };
+ 
+             setReturnS32(&parent, 0);
++            if (getRegU32(&parent, 31) != 0u)
++            {
++                parent.pc = getRegU32(&parent, 31);
++            }
+             if (endFunction == 0u || iopResult.callbackPolicy == ps2x::iop::CallbackPolicy::Suppress)
+             {
+                 completeClient(parent, endFunction != 0u);

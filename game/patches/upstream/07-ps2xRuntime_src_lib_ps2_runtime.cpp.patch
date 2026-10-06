@@ -1,0 +1,21 @@
+diff --git a/ps2xRuntime/src/lib/ps2_runtime.cpp b/ps2xRuntime/src/lib/ps2_runtime.cpp
+index 45cb9d2..6a474da 100644
+--- a/ps2xRuntime/src/lib/ps2_runtime.cpp
++++ b/ps2xRuntime/src/lib/ps2_runtime.cpp
+@@ -2416,10 +2416,16 @@ void PS2Runtime::run()
+                                                << " gif=" << curGif
+                                                << " gsw=" << curGs
+                                                << " vif=" << curVif
++                                               << " p3Mask=" << (m_memory.isPath3Masked() ? 1 : 0)
++                                               << " p3Fifo=" << m_memory.path3MaskedFifoSize()
+                                                << std::endl);
+ 
+             }
+         });
++        if (m_memory.path3MaskedFifoSize() > 0)
++        {
++            m_memory.flushMaskedPath3Packets(true, true);
++        }
+         uint32_t presentWidth = FB_WIDTH;
+         uint32_t presentHeight = DEFAULT_DISPLAY_HEIGHT;
+         UploadFrame(frameTex, this, presentWidth, presentHeight);

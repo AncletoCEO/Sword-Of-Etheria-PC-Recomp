@@ -1,0 +1,33 @@
+diff --git a/ps2xIOP/src/emulator/services/iop_rpc.cpp b/ps2xIOP/src/emulator/services/iop_rpc.cpp
+index cf4fdc6..07a4dde 100644
+--- a/ps2xIOP/src/emulator/services/iop_rpc.cpp
++++ b/ps2xIOP/src/emulator/services/iop_rpc.cpp
+@@ -8,6 +8,7 @@
+ #include <algorithm>
+ #include <array>
+ #include <cstring>
++#include <iostream>
+ #include <limits>
+ #include <vector>
+ 
+@@ -221,6 +222,20 @@ namespace ps2x::iop::detail
+             server.callbackBuffer = m_memory.read32(stackPointer + 20u);
+             server.queue = m_memory.read32(stackPointer + 24u);
+             m_servers[server.sid] = server;
++            // TRIAGE RPC-SERVER 2026-10-05 (temporal, visual-primero): ver
++            // qué sids registran servidor (¿0x573 de SD_CALL?). Una vez c/u.
++            {
++                static uint32_t s_loggedSids[16] = {};
++                static int s_loggedCount = 0;
++                bool seen = false;
++                for (int i = 0; i < s_loggedCount; ++i)
++                    if (s_loggedSids[i] == server.sid) { seen = true; break; }
++                if (!seen && s_loggedCount < 16) {
++                    s_loggedSids[s_loggedCount++] = server.sid;
++                    std::cout << "[triage-rpc] RegisterRpc sid=0x" << std::hex << server.sid
++                              << " func=0x" << server.function << std::dec << std::endl;
++                }
++            }
+             if (server.serverData != 0u)
+             {
+                 m_memory.write32(server.serverData + 0x20u, server.sid);

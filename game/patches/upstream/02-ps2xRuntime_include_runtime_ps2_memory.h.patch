@@ -1,0 +1,14 @@
+diff --git a/ps2xRuntime/include/runtime/ps2_memory.h b/ps2xRuntime/include/runtime/ps2_memory.h
+index ea86a9c..fbb3433 100644
+--- a/ps2xRuntime/include/runtime/ps2_memory.h
++++ b/ps2xRuntime/include/runtime/ps2_memory.h
+@@ -332,7 +332,8 @@ public:
+     const uint8_t *getVU0Data() const { return m_vu0Data; }
+ 
+     bool isPath3Masked() const { return m_path3Masked; }
+-    void flushMaskedPath3Packets(bool drainImmediately = true);
++    size_t path3MaskedFifoSize() const { return m_path3MaskedFifo.size(); }
++    void flushMaskedPath3Packets(bool drainImmediately = true, bool force = false);
+ 
+     void submitGifPacket(GifPathId pathId, const uint8_t *data, uint32_t sizeBytes, bool drainImmediately = true, bool path2DirectHl = false);
+     void processGIFPacket(uint32_t srcPhysAddr, uint32_t qwCount);

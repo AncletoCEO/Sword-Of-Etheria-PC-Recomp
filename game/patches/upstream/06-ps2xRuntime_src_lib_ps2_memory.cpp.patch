@@ -1,0 +1,16 @@
+diff --git a/ps2xRuntime/src/lib/ps2_memory.cpp b/ps2xRuntime/src/lib/ps2_memory.cpp
+index 37b6a4d..a57fef5 100644
+--- a/ps2xRuntime/src/lib/ps2_memory.cpp
++++ b/ps2xRuntime/src/lib/ps2_memory.cpp
+@@ -1919,9 +1919,9 @@ std::vector<uint32_t> PS2Memory::consumeCompletedDmacCauses()
+     return causes;
+ }
+ 
+-void PS2Memory::flushMaskedPath3Packets(bool drainImmediately)
++void PS2Memory::flushMaskedPath3Packets(bool drainImmediately, bool force)
+ {
+-    if (m_path3Masked || m_path3MaskedFifo.empty())
++    if ((m_path3Masked && !force) || m_path3MaskedFifo.empty())
+         return;
+ 
+     auto emit = [&](const uint8_t *packetData, uint32_t packetSize)
