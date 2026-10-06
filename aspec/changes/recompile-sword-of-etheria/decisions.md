@@ -358,3 +358,15 @@ A6.** Ninguna acción de esta sección se ejecutó.
   el copy (`48+=44`) solo corre con `v0==1` (sum<0x41); mi `44=65` lo
   impedía (sum≥41 → 2 → return). Decisión (2026-10-06i3): goteo
   incremental `44=1` por poll (si `44==0` y `48<65`) hasta `48=65`.
+- Resultado goteo: `44=1, 48=0` + resubmits de vuelta (91 PREs): `v0==1`
+  = "otra vez" para el caller de polls; el copy nunca corre (el batch
+  `0x627b50` no vuelve). El worker no consume el ítem.
+- En curso (2026-10-06l): BYPASS de `6E4ED8` (submitter SPU del loop;
+  sus callers ignoran `v0` → retorno 0 inmediato seguro). Si avanza → el
+  waiter vive dentro (bypass silencioso candidato v0.1.0).
+- Resultado aliasing: MUERTO (`gp+0x44=0xA280B4` ≠ `recv+4=0xA44944`;
+  `gp=0xA28070` es el gp del overlay, `ra=0x627afc` confirma polls desde
+  el wrapper s2==0). Hallazgo mayor: el wrapper retorna 1/2 por suma pero
+  el copy (`48+=44`) solo corre con `v0==1` (sum<0x41); mi `44=65` lo
+  impedía (sum≥41 → 2 → return). Decisión (2026-10-06i3): goteo
+  incremental `44=1` por poll (si `44==0` y `48<65`) hasta `48=65`.
