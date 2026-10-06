@@ -239,13 +239,25 @@ A6.** Ninguna acción de esta sección se ejecutó.
   `build_release.py:118`.
 - Higiene `[PS2]`/`[NO-PS2]`; `smoke_report.py` estandarizado.
 
-## Preguntas abiertas (mañana)
+## Preguntas abiertas (actualizado 2026-10-06)
 1. Fix quirúrgico ENVX voces 18-23 (¿envolvente llena las desbloquea?).
 2. Si no: modelo de ciclo de voz (KeyOn→ENDX) mínimo.
 3. Servir `SD.BIN` en bulk cuando el layout del comando de 16 B se conozca
    (tarea 4.6-4).
 4. Revertir triages al drenar (tarea 4.6-5) → menú → tag `v0.1.0`.
 
-> **Bloqueantes nuevos (auditoría 2026-10-05), previos a 1-4:** resolver A1
-> (versionar el runtime), A2 (unificar build) y A6 (CI/release). Sin A1 no hay
-> forma de reproducir el estado actual desde el repo.
+## Respuestas a la auditoría 2026-10-05 (2026-10-06)
+- **A7 memoria: refutado.** `searchMemory("playable release autonomy")`
+  devuelve la regla `release-playable-first` (scope project, 2026-10-04).
+  La memoria no está vacía; la query de la auditoría no matcheó.
+- **A1 hecho y validado**: 14 parches aplicables + applier idempotente;
+  `build_release.py` pinea (`75d729c`) y aplica. Prueba desde cero OK.
+  Commit `d6e0150`.
+- **A2 hecho**: `game/sync_work.py` (fuente única `game/`); divergencias=0
+  verificado; `build_release.py` lo ejecuta.
+- **A6 pendiente**: requiere menú visible para el gate; no taggear antes.
+- **A4 (no sumar triages)**: de acuerdo en espíritu; el fix ENVX propuesto
+  queda supeditado a no romper verificación init (solo valores no escritos
+  o con justificación). Sin adivinanzas.
+- **Conteo 38/44**: incluye tareas de tooling (smoke_report, Fase 5.1);
+  el hito sigue abierto y visible como tal. Sin discrepancia real.

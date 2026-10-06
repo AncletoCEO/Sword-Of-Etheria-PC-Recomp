@@ -71,6 +71,12 @@
 
 - [x] `game/smoke_report.py`: corre el binario con timeout y resume tick/gif/VRAM, modo audio (polls vs transfers), spin `0x6e4d98`, unhandled imports, triages y causa de salida con veredicto (verificado 2026-10-05: corrida 30s → TRANSFER correcto)
 
+## Fase 5.1 — Reproducibilidad (auditoría A1/A2/A6, 2026-10-06)
+
+- [x] A1 parches aplicables del runtime: 14 patches en `game/patches/upstream/` (export `git diff -w` sobre pin `75d729c`) + `game/apply_patches.py` idempotente; `build_release.py` pinea el clon y los aplica (validado: clon fresco 14/14 ok, árbol equivalente con `diff -w`)
+- [x] A2 fuente única `game/`: `game/sync_work.py` copia `CMakeLists.txt`/`game_main.cpp`/`split_monsters.py` a `work/build-game/` cuando difieren; `build_release.py` lo ejecuta (verificado: divergencias=0)
+- [ ] A6 CI/release que valide: `release.yml` debe aplicar parches, compilar el juego y correr smoke con gate (sin tag `v0.1.0` hasta menú visible)
+
 ## Fase 5 — Publicación y release
 
 - [x] Calcular MD5 del ISO PAL Europa: `md5sum "Sword of Etheria, The (Europe) (En,Fr,De,Es,It).iso"` y registrarlo aquí y en `build_release.py` (2026-10-03: `b9c5115b77b7f05fbf14a67df8d3f99d`)

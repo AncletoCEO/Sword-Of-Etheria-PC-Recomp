@@ -34,6 +34,9 @@ ELF_NAME = "SLES_537.68"
 
 REPO_ROOT = os.path.dirname(os.path.abspath(__file__))
 
+sys.path.insert(0, os.path.join(REPO_ROOT, "game"))
+from apply_patches import PS2RECOMP_PIN  # noqa: E402  (pin único del runtime)
+
 
 def md5_of(path: str) -> str:
     h = hashlib.md5()
@@ -74,6 +77,21 @@ def main() -> None:
     check_iso(args.iso)
     if args.check_only:
         return
+
+    # A1: runtime pineado + parches del juego (reproducibilidad).
+    if os.path.isdir(os.path.join(args.tools, ".git")):
+        head = subprocess.run(["git", "rev-parse", "HEAD"], cwd=args.tools,
+                              capture_output=True, text=True)
+        if head.returncode == 0 and head.stdout.strip() != PS2RECOMP_PIN:
+            print(f"tools en {head.stdout.strip()}, pineando a {PS2RECOMP_PIN}...")
+            run(["git", "checkout", PS2RECOMP_PIN], cwd=args.tools)
+    else:
+        run(["git", "clone", "https://github.com/ran-j/PS2Recomp.git", args.tools])
+        run(["git", "checkout", PS2RECOMP_PIN], cwd=args.tools)
+    run([sys.executable, os.path.join(REPO_ROOT, "game", "apply_patches.py"),
+         "--tools", args.tools])
+    # A2: fuente de verdad game/ -> work/build-game/ (dev).
+    run([sys.executable, os.path.join(REPO_ROOT, "game", "sync_work.py")])
 
     elf_dir = os.path.join(args.work, "elf")
     gen_dir = os.path.join(args.work, "generated")
