@@ -383,3 +383,9 @@ A6.** Ninguna acción de esta sección se ejecutó.
   pristine = 64.
 - En curso (2026-10-06o): completar el ítem (`w2=0` + 64 flags en 1) cada
   visita del spin. Si el worker avanza b → breakthrough.
+- Resultado item-complete: SIN efecto.
+- En curso (2026-10-06p): contadores dinámicos spin/flip/productor
+  (flip: log+skip sb; prod: log+emulación exacta del sw). Si flips=0 con
+  spins creciendo → la salida forzada no llega al flip (atorado entre
+  `0x6e4dac-0x6e4e00`, i.e., en el cb). Si flips crecen pero `a` no alterna
+  → el productor/tabla re-escribe.
