@@ -376,6 +376,10 @@ A6.** Ninguna acción de esta sección se ejecutó.
 - En curso (2026-10-06m): `48=65` directo (el copy es irrelevante en
   silencio). Si el caller mira 48 → menú; si crash → info de layout; si
   nada → el gate es otro (w2/tabla/Status-wait).
+- Resultado 48=65: SIN efecto. Baseline 06v: `44=0, 48=0` naturales (el 40
+  era polución de mis incrementos). El `44++` vive en `0x627f50` SIN
+  callers directos en fullGame → candidato a callback SIF async. En curso
+  (2026-10-06w): log `endFunction` por rpc (¿callback que nunca corre?).
 - Resultado 48=65: SIN efecto (spin vuelve a a≠b según timing). El gate es
   conjunción con `w2` (ítem+8).
 - Resultado ítem (2026-10-06n): `{cmd=0x1101, dst=0xB15B00, count=0x40,
