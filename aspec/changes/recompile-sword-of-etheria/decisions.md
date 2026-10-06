@@ -261,3 +261,14 @@ A6.** Ninguna acción de esta sección se ejecutó.
   o con justificación). Sin adivinanzas.
 - **Conteo 38/44**: incluye tareas de tooling (smoke_report, Fase 5.1);
   el hito sigue abierto y visible como tal. Sin discrepancia real.
+  (Nota 2026-10-06: el conteo quedó en 40/47 tras Fase 5.1 + tooling.)
+
+## Progresión lenta, no estancamiento (2026-10-06)
+- Comparando pc-sets: corrida 10 min toca 15 pcs que la de 60s jamás toca
+  (`0x6e4dd0` salida del spin, worker `0x6e4068` vía poller, `0x5129e4`,
+  `0x534568`, etc.). Primeras apariciones repartidas hasta tick 25440:
+  el juego sigue explorando código nuevo a los ~9 min, sin asíntota.
+- Hipótesis operativa: el avance existe pero es glacial (transfers 2-4/s).
+  En marcha corrida de 30 min (background) para ver si llega a menú o a
+  nueva fase (`gif>2`). Si a los 30 min sigue `gif=2` sin novedad,
+  volver al fix quirúrgico (waiter SDRDRV / ciclo de voz).
