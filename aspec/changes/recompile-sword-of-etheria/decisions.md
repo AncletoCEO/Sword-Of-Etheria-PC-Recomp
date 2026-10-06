@@ -329,3 +329,12 @@ A6.** Ninguna acción de esta sección se ejecutó.
   IMPORT y ramifica por códigos negativos (`-0x1A2` etc.). En curso
   (2026-10-06i): log genérico de TODO import anidado (`depth>=1`) durante
   transfers para nombrar ese import.
+- Resultado NESTED (2026-10-06, noche): CERO imports anidados. El `jal
+  0xa85c` de helper#2 es hoja local (`jr ra`, `.text` termina en `0xa890`),
+  no import: **todo el handler 0x30000 es código local + globales**, sin
+  llamadas externas. El gate es un GLOBAL.
+- Helper#1 (SD_CALL `0x48710`) lee el word absoluto IOP `0xC560` (lui 1 +
+  lw -0x3AA0, sin reloc en su posición): 0 = rama éxito (helper#2 con
+  count, helper#3 copia buffer→tabla driver, status 0), !=0 = ramas busy.
+  En curso (2026-10-06j): peek de `0xC560` + status `0xC0FE` en el triage de
+  reply para saber qué rama toma.
