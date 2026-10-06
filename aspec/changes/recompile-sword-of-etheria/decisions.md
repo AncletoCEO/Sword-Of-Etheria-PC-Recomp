@@ -352,3 +352,9 @@ A6.** Ninguna acción de esta sección se ejecutó.
   → gp=`0xA44900`). El word1 del reply sería A LA VEZ pos (streaming) y 44
   (llegadas): nuestro fakePos (MBs) lleva corrompiendo 44 desde el 04/10.
   En curso: log `recv/rsize/gp/ra` del primer poll para confirmar o matar.
+- Resultado aliasing: MUERTO (`gp+0x44=0xA280B4` ≠ `recv+4=0xA44944`;
+  `gp=0xA28070` es el gp del overlay, `ra=0x627afc` confirma polls desde
+  el wrapper s2==0). Hallazgo mayor: el wrapper retorna 1/2 por suma pero
+  el copy (`48+=44`) solo corre con `v0==1` (sum<0x41); mi `44=65` lo
+  impedía (sum≥41 → 2 → return). Decisión (2026-10-06i3): goteo
+  incremental `44=1` por poll (si `44==0` y `48<65`) hasta `48=65`.
