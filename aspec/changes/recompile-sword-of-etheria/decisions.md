@@ -346,3 +346,9 @@ A6.** Ninguna acción de esta sección se ejecutó.
   umbral del wrapper) por la vía real: `44 = 65-48` una vez en PRE, el
   copy-loop calcula `48 = 65`. Si el caller llega a menú silencioso →
   breakthrough v0.1.0.
+- Resultado to65: `44 40->65 (48=0)` SIN efecto. `48=0` prueba que el
+  copy-loop NUNCA corrió: el secuenciador `0x627b50` no vuelve a correr.
+- Hipótesis aliasing (2026-10-06k): `recv+4 == gp+0x44` (recv=`0xA44940`
+  → gp=`0xA44900`). El word1 del reply sería A LA VEZ pos (streaming) y 44
+  (llegadas): nuestro fakePos (MBs) lleva corrompiendo 44 desde el 04/10.
+  En curso: log `recv/rsize/gp/ra` del primer poll para confirmar o matar.
