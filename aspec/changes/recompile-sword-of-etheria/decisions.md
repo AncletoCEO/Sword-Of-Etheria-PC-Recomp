@@ -364,6 +364,12 @@ A6.** Ninguna acción de esta sección se ejecutó.
 - En curso (2026-10-06l): BYPASS de `6E4ED8` (submitter SPU del loop;
   sus callers ignoran `v0` → retorno 0 inmediato seguro). Si avanza → el
   waiter vive dentro (bypass silencioso candidato v0.1.0).
+- Resultado bypass: SIN efecto + `6E4ED8` NUNCA se llama (el worker no
+  tiene nada que someter: ítems con `w1<=0` se saltean). Hallazgo: con
+  goteo, submits 16B SÍ fluyen (bloque `0x20000` repetido, `cmd` constante)
+  y `44` baja 40→1 (restantes de un presupuesto de 40). Al llegar a 0,
+  cambia de fase (nuevo stall o avance). En curso: log denso + corrida
+  larga para ver qué sigue a `44=0`.
 - Resultado aliasing: MUERTO (`gp+0x44=0xA280B4` ≠ `recv+4=0xA44944`;
   `gp=0xA28070` es el gp del overlay, `ra=0x627afc` confirma polls desde
   el wrapper s2==0). Hallazgo mayor: el wrapper retorna 1/2 por suma pero
