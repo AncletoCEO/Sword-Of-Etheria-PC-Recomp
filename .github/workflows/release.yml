@@ -2,35 +2,54 @@ name: release
 
 on:
   push:
+    branches:
+      - main
     tags:
       - "v*.*.*"
+  pull_request:
+  workflow_dispatch:
 
 jobs:
   build-linux:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Install deps
+
+      - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y cmake ninja-build g++ python3 libgl1 libx11-6
-      - name: Clone PS2Recomp tools
-        run: git clone --recurse-submodules https://github.com/ran-j/PS2Recomp.git tools-ci
+          sudo apt-get install -y cmake ninja-build g++ python3 libgl1-mesa-dev libx11-dev libxcursor-dev libxrandr-dev libxi-dev libxinerama-dev libasound2-dev libpulse-dev
+
+      - name: Checkout and pin PS2Recomp tools
+        run: |
+          git clone --recurse-submodules https://github.com/ran-j/PS2Recomp.git tools-ci
+          git -C tools-ci checkout 75d729ce40d7eed9649fd4bb05628dee520f3d0c
+
+      - name: Apply upstream patches
+        run: |
+          python3 game/apply_patches.py --tools tools-ci
+
       - name: Build ps2_recomp and ps2_analyzer
         run: |
           cmake -S tools-ci -B tools-ci/out -G "Unix Makefiles" -DCMAKE_BUILD_TYPE=Release
           cmake --build tools-ci/out -j$(nproc)
-      - name: Validate release script
+
+      - name: Validate scripts and smoke parser
         run: |
-          python3 -m py_compile build_release.py
+          python3 -m py_compile build_release.py game/*.py
           python3 build_release.py --help
-      - name: Package
+          python3 game/smoke_report.py --help
+
+      - name: Package artifacts
         run: |
-          mkdir -p dist
-          cp tools-ci/out/ps2xRecomp/ps2_recomp tools-ci/out/ps2xAnalyzer/ps2_analyzer dist/ 2>/dev/null || cp tools-ci/out/*/ps2_* dist/
-          cp build_release.py game/CMakeLists.txt game/game_main.cpp game/split_monsters.py dist/
+          mkdir -p dist/tools/PS2Recomp/out dist/game
+          cp tools-ci/out/ps2xRecomp/ps2_recomp tools-ci/out/ps2xAnalyzer/ps2_analyzer dist/tools/PS2Recomp/out/ 2>/dev/null || cp tools-ci/out/*/ps2_* dist/tools/PS2Recomp/out/
+          cp build_release.py README.md dist/
+          cp -r game/* dist/game/
           tar -czf sword-etheria-tools-linux.tar.gz -C dist .
+
       - name: Upload asset
+        if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
           files: sword-etheria-tools-linux.tar.gz
@@ -40,24 +59,42 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: ilammy/msvc-dev-cmd@v1
-      - name: Clone PS2Recomp tools
-        run: git clone --recurse-submodules https://github.com/ran-j/PS2Recomp.git tools-ci
+
+      - name: Checkout and pin PS2Recomp tools
+        run: |
+          git clone --recurse-submodules https://github.com/ran-j/PS2Recomp.git tools-ci
+          git -C tools-ci checkout 75d729ce40d7eed9649fd4bb05628dee520f3d0c
+        shell: pwsh
+
+      - name: Apply upstream patches
+        run: |
+          python game/apply_patches.py --tools tools-ci
+        shell: pwsh
+
       - name: Build ps2_recomp and ps2_analyzer
         run: |
           cmake -S tools-ci -B tools-ci/out -G "Visual Studio 17 2022" -A x64
           cmake --build tools-ci/out --config Release
-      - name: Validate release script
+        shell: pwsh
+
+      - name: Validate scripts and smoke parser
         run: |
           python -m py_compile build_release.py
           python build_release.py --help
-      - name: Package
+          python game/smoke_report.py --help
+        shell: pwsh
+
+      - name: Package artifacts
         run: |
-          mkdir dist
-          Get-ChildItem tools-ci/out -Recurse -Include ps2_recomp.exe,ps2_analyzer.exe | Copy-Item -Destination dist/
-          Copy-Item build_release.py, game/CMakeLists.txt, game/game_main.cpp, game/split_monsters.py dist/
+          New-Item -ItemType Directory -Force -Path dist/tools/PS2Recomp/out, dist/game
+          Get-ChildItem tools-ci/out -Recurse -Include ps2_recomp.exe,ps2_analyzer.exe | Copy-Item -Destination dist/tools/PS2Recomp/out/
+          Copy-Item build_release.py, README.md dist/
+          Copy-Item -Recurse game/* dist/game/
           Compress-Archive -Path dist/* -DestinationPath sword-etheria-tools-windows.zip
         shell: pwsh
+
       - name: Upload asset
+        if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
           files: sword-etheria-tools-windows.zip

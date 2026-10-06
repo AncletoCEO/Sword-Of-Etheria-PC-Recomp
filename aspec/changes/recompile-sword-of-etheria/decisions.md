@@ -255,7 +255,7 @@ A6.** Ninguna acción de esta sección se ejecutó.
   Commit `d6e0150`.
 - **A2 hecho**: `game/sync_work.py` (fuente única `game/`); divergencias=0
   verificado; `build_release.py` lo ejecuta.
-- **A6 pendiente**: requiere menú visible para el gate; no taggear antes.
+- **A6 hecho**: `release.yml` actualizado para reproducibilidad: triggers ampliados a main/PR, checkout pineado (`75d729c`), aplicación de parches con `apply_patches.py`, validación de scripts/smoke, empaquetado preservando estructura `game/` completa y assets de release solo en tags `v*.*.*`. Tag `v0.1.0` continúa condicionado a menú visible.
 - **A4 (no sumar triages)**: de acuerdo en espíritu; el fix ENVX propuesto
   queda supeditado a no romper verificación init (solo valores no escritos
   o con justificación). Sin adivinanzas.

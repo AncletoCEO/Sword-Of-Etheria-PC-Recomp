@@ -11,7 +11,11 @@ cmake_minimum_required(VERSION 3.21)
 # Raíz del repo: por defecto <este-dir>/../.. ; sobreescribible con
 # -DREPO_ROOT=... (útil al migrar el build a otra máquina/SO).
 if(NOT DEFINED REPO_ROOT)
-    get_filename_component(REPO_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../.." ABSOLUTE)
+    if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/../game")
+        get_filename_component(REPO_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/.." ABSOLUTE)
+    else()
+        get_filename_component(REPO_ROOT "${CMAKE_CURRENT_SOURCE_DIR}/../.." ABSOLUTE)
+    endif()
 endif()
 if(WIN32)
     file(TO_CMAKE_PATH "${REPO_ROOT}" REPO_ROOT)

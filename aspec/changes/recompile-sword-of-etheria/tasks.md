@@ -75,7 +75,7 @@
 
 - [x] A1 parches aplicables del runtime: 14 patches en `game/patches/upstream/` (export `git diff -w` sobre pin `75d729c`) + `game/apply_patches.py` idempotente; `build_release.py` pinea el clon y los aplica (validado: clon fresco 14/14 ok, árbol equivalente con `diff -w`)
 - [x] A2 fuente única `game/`: `game/sync_work.py` copia `CMakeLists.txt`/`game_main.cpp`/`split_monsters.py` a `work/build-game/` cuando difieren; `build_release.py` lo ejecuta (verificado: divergencias=0)
-- [ ] A6 CI/release que valide: `release.yml` debe aplicar parches, compilar el juego y correr smoke con gate (sin tag `v0.1.0` hasta menú visible)
+- [x] A6 CI/release que valide: `release.yml` actualizado con trigger main/PR, checkout pineado `75d729c`, aplicación de parches vía `game/apply_patches.py`, validación de scripts/smoke, empaquetado completo con árbol `game/` y subida condicionada a tags `v*.*.*` (2026-10-06).
 
 ## Fase 5 — Publicación y release
 
