@@ -304,3 +304,9 @@ A6.** Ninguna acción de esta sección se ejecutó.
 - Resultado bulk todo-unos (2026-10-06b): SIN cambio (tick=3240, sin crash).
   Conclusión: el EE **no decide por `v0`/`recv`** del RPC sino por el estado
   de cola (a/b/tabla/w2), que solo avanza el worker con completado real.
+- IATROGENIA CONFIRMADA (2026-10-06e): sin incremento 44/48,
+  `transfers_30000=3` (vs 80) y `hybrid_pre=1` (vs 73). El incremento
+  causaba el resubmit; el secuenciador ahora está quieto en el spin.
+- Experimento F en curso (2026-10-06f): `44 = 40` UNA vez en el primer POST
+  (simula "los 40 bloques llegaron") para que el copy-loop real consuma
+  (`48 += 44; 44 = 0`) y los polls vean `44 = 0` → rama done.
