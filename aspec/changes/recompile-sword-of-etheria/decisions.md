@@ -272,3 +272,19 @@ A6.** Ninguna acción de esta sección se ejecutó.
   En marcha corrida de 30 min (background) para ver si llega a menú o a
   nueva fase (`gif>2`). Si a los 30 min sigue `gif=2` sin novedad,
   volver al fix quirúrgico (waiter SDRDRV / ciclo de voz).
+
+## Layout del comando 16B + bulk-serve (2026-10-06, tarde)
+- Corrección: el servidor `0x573` vive en `SD_CALL.IRX` (base `0x47500`,
+  handler `0x47be4` = entry real). `SDRDRV.IRX` sí carga físico (id=5,
+  base `0x80b00`); el disasm previo apuntaba al archivo equivocado. El
+  dispatcher `0x47be4` sí atiende `0x10000/0x20000/0x30000` (comparación
+  directa con `a0`, no `0x81xx`).
+- Comando 16B completo (log IOP): constante
+  `[0x11050000, 0x00020000, 0, 0]` — el productor reintenta el bloque 1
+  eternamente. Primer 16B tras el descriptor 640B vino en ceros (n=2).
+- Descriptor 640B (EE `sendBuf=0xa44100`): array de 40 entradas de 16B
+  `[0x11050000, bloque++, 0, 0]` con bloques `0x20000, 0x30000, ...`.
+  `recv` 352B = 32 + 40x8 (status por bloque). `rsize=352`, `mode=1`.
+- Experimento en curso: POST de `0x30000` rellena recv con todo-unos
+  (hipótesis: el EE espera status-done por bloque). Si avanza → breakthrough;
+  si crashea → el pc revela el layout esperado; si igual → no lee recv.
