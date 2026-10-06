@@ -376,3 +376,7 @@ A6.** Ninguna acción de esta sección se ejecutó.
 - En curso (2026-10-06m): `48=65` directo (el copy es irrelevante en
   silencio). Si el caller mira 48 → menú; si crash → info de layout; si
   nada → el gate es otro (w2/tabla/Status-wait).
+- Resultado 48=65: SIN efecto (spin vuelve a a≠b según timing). El gate es
+  conjunción con `w2` (ítem+8, siempre restaurado a 65: hay un MASTER que
+  republica). En curso (2026-10-06n): volcado único del ÍTEM + tabla
+  maestra + `0x61C` para fijar el master correcto en vez del slot.
