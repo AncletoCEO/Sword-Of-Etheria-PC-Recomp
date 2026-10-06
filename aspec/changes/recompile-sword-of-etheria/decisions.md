@@ -314,3 +314,11 @@ A6.** Ninguna acción de esta sección se ejecutó.
   somete el descriptor UNA vez y luego solo polls `rpc=0`). One-shot movido
   al PRE. Experimento G: `fakePos` salta a 64KB del fin de SD.BIN sin wrap
   (si el gate de los polls es posición, completa en pocos polls).
+- Resultado F+G (2026-10-06, noche): ambos dispararon (`44 40->40`,
+  `fakePos=715278336`) SIN efecto. `44=40` es preset REAL del EE (sin triage
+  que lo toque). El secuenciador de transfers no vuelve a correr; todo el
+  ciclo vivo está en worker/spin/poller/6E4068 con a/b congelados.
+- Nuevo foco (2026-10-06h): el handler muere en su primer helper (import
+  `libsd`, jal sin relocar `0x1210`). Instrumentación: log de llamadas
+  anidadas a rangos Sony (`0x39f00-0x47500`, `0x80b00-0x8a000`) con args —
+  nombra al waiter exacto sin adivinar.
