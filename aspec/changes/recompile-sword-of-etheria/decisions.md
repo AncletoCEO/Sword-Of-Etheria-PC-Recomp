@@ -338,3 +338,11 @@ A6.** Ninguna acción de esta sección se ejecutó.
   count, helper#3 copia buffer→tabla driver, status 0), !=0 = ramas busy.
   En curso (2026-10-06j): peek de `0xC560` + status `0xC0FE` en el triage de
   reply para saber qué rama toma.
+- Resultado peek: `gC560=0` (rama éxito: el handler SÍ copia buffer→tabla,
+  status 0) y reply con patrón `ffffffff/0000ff00` (no ceros). El IOP
+  completa localmente; el EE no se entera porque el secuenciador de
+  transfers no vuelve a correr y `44` queda en 40.
+- Decisión playable-first (2026-10-06i2): completar al total 65 (`0x41`,
+  umbral del wrapper) por la vía real: `44 = 65-48` una vez en PRE, el
+  copy-loop calcula `48 = 65`. Si el caller llega a menú silencioso →
+  breakthrough v0.1.0.
