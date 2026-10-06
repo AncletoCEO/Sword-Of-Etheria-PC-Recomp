@@ -322,3 +322,10 @@ A6.** Ninguna acción de esta sección se ejecutó.
   `libsd`, jal sin relocar `0x1210`). Instrumentación: log de llamadas
   anidadas a rangos Sony (`0x39f00-0x47500`, `0x80b00-0x8a000`) con args —
   nombra al waiter exacto sin adivinar.
+- Corrección (2026-10-06, noche): el sweep `libsd:6` (`a0=0x500+k`,
+  `a1=1<<k`) viene de LIBSMF2 (`ra=0x22dcc`, hilo 14), NO del handler:
+  es polling de fondo, no el gate. El helper#1 del handler (SD_CALL
+  `0x48710`) lee un global y retorna; helper#2 (`0x48748`) llama a un
+  IMPORT y ramifica por códigos negativos (`-0x1A2` etc.). En curso
+  (2026-10-06i): log genérico de TODO import anidado (`depth>=1`) durante
+  transfers para nombrar ese import.
