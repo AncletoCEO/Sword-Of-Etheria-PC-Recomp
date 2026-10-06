@@ -370,9 +370,9 @@ A6.** Ninguna acción de esta sección se ejecutó.
   y `44` baja 40→1 (restantes de un presupuesto de 40). Al llegar a 0,
   cambia de fase (nuevo stall o avance). En curso: log denso + corrida
   larga para ver qué sigue a `44=0`.
-- Resultado aliasing: MUERTO (`gp+0x44=0xA280B4` ≠ `recv+4=0xA44944`;
-  `gp=0xA28070` es el gp del overlay, `ra=0x627afc` confirma polls desde
-  el wrapper s2==0). Hallazgo mayor: el wrapper retorna 1/2 por suma pero
-  el copy (`48+=44`) solo corre con `v0==1` (sum<0x41); mi `44=65` lo
-  impedía (sum≥41 → 2 → return). Decisión (2026-10-06i3): goteo
-  incremental `44=1` por poll (si `44==0` y `48<65`) hasta `48=65`.
+- Resultado 3min (2026-10-06, noche): `44=1, 48=0` FIJOS, cola DRENADA
+  (`a==b==11623056`, flags 0), pc nuevo `0x511510` (tick 9600), transfers
+  216 (reintentos 16B). Sin menú.
+- En curso (2026-10-06m): `48=65` directo (el copy es irrelevante en
+  silencio). Si el caller mira 48 → menú; si crash → info de layout; si
+  nada → el gate es otro (w2/tabla/Status-wait).
