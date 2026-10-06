@@ -310,3 +310,7 @@ A6.** Ninguna acción de esta sección se ejecutó.
 - Experimento F en curso (2026-10-06f): `44 = 40` UNA vez en el primer POST
   (simula "los 40 bloques llegaron") para que el copy-loop real consuma
   (`48 += 44; 44 = 0`) y los polls vean `44 = 0` → rama done.
+- Corrección (2026-10-06f2): el POST nunca corre sin 2do submit (el juego
+  somete el descriptor UNA vez y luego solo polls `rpc=0`). One-shot movido
+  al PRE. Experimento G: `fakePos` salta a 64KB del fin de SD.BIN sin wrap
+  (si el gate de los polls es posición, completa en pocos polls).
