@@ -288,3 +288,19 @@ A6.** Ninguna acción de esta sección se ejecutó.
 - Experimento en curso: POST de `0x30000` rellena recv con todo-unos
   (hipótesis: el EE espera status-done por bloque). Si avanza → breakthrough;
   si crashea → el pc revela el layout esperado; si igual → no lee recv.
+
+## Protocolo 44/48 del wrapper + posible iatrogenia (2026-10-06, noche)
+- Wrapper `0x627a10` (región fullGame): `sum = *(gp+0x44)+*(gp+0x48)`;
+  `sum<0x41 → return 1`, `sum>=0x41 → return 2`. Caller `0x627b84` ramifica
+  en `v0==2 / ==1 / ==0`.
+- Caller `0x627bc0` (s2==0): si `44>0`, copia `44` bloques de 16B
+  (`0xA44100 → 0xA44500+(48+i)*16`), luego `48 += 44; 44 = 0`.
+  O sea: **44 = bloques recién llegados (solo lo escribe el completado
+  IOP), 48 = total acumulado (solo lo escribe el secuenciador)**.
+- Nuestro triage 2026-10-04 incrementaba 44 Y 48 por poll → finge llegadas
+  infinitas → el caller re-somete eternamente. Livelock auto-infligido
+  candidato. Experimento 2026-10-06e: incremento DESACTIVADO (reversible);
+  si vuelve la tormenta `0x20000`, revertir.
+- Resultado bulk todo-unos (2026-10-06b): SIN cambio (tick=3240, sin crash).
+  Conclusión: el EE **no decide por `v0`/`recv`** del RPC sino por el estado
+  de cola (a/b/tabla/w2), que solo avanza el worker con completado real.
