@@ -34,6 +34,8 @@ cmake-build-*/
 *.log
 ps2_log.txt
 **/node_modules/
+**/__pycache__/
+*.pyc
 .ancleto/memory.db-journal
 
 # Tooling local de agentes/IDE (no versionar: config y memoria de la máquina)
