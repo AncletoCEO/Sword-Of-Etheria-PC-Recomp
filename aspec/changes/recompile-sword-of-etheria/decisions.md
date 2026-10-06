@@ -377,6 +377,9 @@ A6.** Ninguna acción de esta sección se ejecutó.
   silencio). Si el caller mira 48 → menú; si crash → info de layout; si
   nada → el gate es otro (w2/tabla/Status-wait).
 - Resultado 48=65: SIN efecto (spin vuelve a a≠b según timing). El gate es
-  conjunción con `w2` (ítem+8, siempre restaurado a 65: hay un MASTER que
-  republica). En curso (2026-10-06n): volcado único del ÍTEM + tabla
-  maestra + `0x61C` para fijar el master correcto en vez del slot.
+  conjunción con `w2` (ítem+8).
+- Resultado ítem (2026-10-06n): `{cmd=0x1101, dst=0xB15B00, count=0x40,
+  flags=0xA8D0B0}`, `table=[0xA96680, 0xB15A80]`, `61c=0xA96690`. `w2`
+  pristine = 64.
+- En curso (2026-10-06o): completar el ítem (`w2=0` + 64 flags en 1) cada
+  visita del spin. Si el worker avanza b → breakthrough.
