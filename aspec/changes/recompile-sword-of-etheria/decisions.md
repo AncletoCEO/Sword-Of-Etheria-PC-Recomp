@@ -390,6 +390,9 @@ A6.** Ninguna acción de esta sección se ejecutó.
   `0x6e4dac-0x6e4e00`, i.e., en el cb). Si flips crecen pero `a` no alterna
   → el productor/tabla re-escribe.
 - Resultado flow: flip=0, prod=0 (nunca corren); `sp` ESTABLE (sin
-  recursión infinita: todo retorna). En curso (2026-10-06q): hooks con
-  emulación exacta en `0x6e4dd8` (di/salida) y `0x6e4e04` (sw b/flip) para
-  clavar el punto exacto del atorón.
+  recursión infinita: todo retorna). Pinpoint 06q: ningún hook corre (ni
+  salida ni flip); `cb` siempre nuestro poller → el poller no retorna (o la
+  salida desvía antes del call).
+- En curso (2026-10-06s/t): log `ra` cada visita + salto DIRECTO a
+  `0x6e4dd8` (post-loop) en vez de `0x6e4dac`. Dirime: si flips corren →
+  el cb era el agujero; si ni así → falla el mecanismo de salto.
