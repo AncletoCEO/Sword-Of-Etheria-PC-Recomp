@@ -389,3 +389,7 @@ A6.** Ninguna acción de esta sección se ejecutó.
   spins creciendo → la salida forzada no llega al flip (atorado entre
   `0x6e4dac-0x6e4e00`, i.e., en el cb). Si flips crecen pero `a` no alterna
   → el productor/tabla re-escribe.
+- Resultado flow: flip=0, prod=0 (nunca corren); `sp` ESTABLE (sin
+  recursión infinita: todo retorna). En curso (2026-10-06q): hooks con
+  emulación exacta en `0x6e4dd8` (di/salida) y `0x6e4e04` (sw b/flip) para
+  clavar el punto exacto del atorón.
