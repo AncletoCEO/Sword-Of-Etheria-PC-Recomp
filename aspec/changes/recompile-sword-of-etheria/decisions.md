@@ -413,3 +413,9 @@ A6.** Ninguna acción de esta sección se ejecutó.
   `bc0f` (`0x6e4d24`, `0x6e4ac4`, flag C0 que nada pone). En curso
   (2026-10-06z): fallthrough forzado en ambos (equivalencia exacta con DMA
   síncrono). Si el worker avanza → era ese wait.
+- BREAKTHROUGH (2026-10-06, noche): con el build bc0f+cb9d0, ¡SIN SPIN
+  (`spin_hits=0`) y VRAM CON DATOS REALES creciendo
+  (`262144→306048→524288`)! El juego pasó a render. Hipótesis: el hook del
+  callback `0x6279D0` (o varianza de corrida) lo desbloqueó; los hooks bc0f
+  nunca dispararon. En curso: corrida 5min + BMPs para ver si llega a menú.
+  Si menú → v0.1.0 (revertir triages después, A6 gate).
