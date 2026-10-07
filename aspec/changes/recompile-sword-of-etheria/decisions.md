@@ -429,3 +429,7 @@ A6.** Ninguna acción de esta sección se ejecutó.
   callback `0x6279D0` (o varianza de corrida) lo desbloqueó; los hooks bc0f
   nunca dispararon. En curso: corrida 5min + BMPs para ver si llega a menú.
   Si menú → v0.1.0 (revertir triages después, A6 gate).
+- Giro de paradigma (2026-10-07): el audio puede estar TERMINADO (`spin=0`).
+  Con pmode=0x8067 + dispfb1 alternando (0x1000/0x1080/0x1400) hay double-
+  buffer real, pero frames negros (shot_1/shot_241 = 0px). El park es otro
+  bloqueo. En curso: hook exacto en `0x4c1970` (dispatch worker thread).
