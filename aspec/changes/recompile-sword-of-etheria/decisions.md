@@ -408,6 +408,10 @@ A6.** Ninguna acción de esta sección se ejecutó.
 - Resultado callback (2026-10-06y): `endfn-6279D0` CORRE (n=1..5+). El SIF
   async vive; el completado `4C38D8`+`ei` se ejecuta. El stall está aguas
   abajo del callback.
+- Modelo huevo-gallina (2026-10-06z2): `627B50` salta el submit si `48<=0`
+  (blez→`0x627C48`); el consumo necesita `44>0`; los arrivals no existen.
+  Todo en 0 = idle estable. Kickstart: `48=1` UNA vez en PRE; si el ciclo
+  se autosostiene (real) → WIN.
 - Varianza entre corridas: sin spin (worker estacionado en `0x6e4cdc`,
   dentro de 6E4848 que no retorna y no llega al spin). Candidatos: loops
   `bc0f` (`0x6e4d24`, `0x6e4ac4`, flag C0 que nada pone). En curso
