@@ -400,3 +400,16 @@ A6.** Ninguna acción de esta sección se ejecutó.
 - En curso (2026-10-06s/t): log `ra` cada visita + salto DIRECTO a
   `0x6e4dd8` (post-loop) en vez de `0x6e4dac`. Dirime: si flips corren →
   el cb era el agujero; si ni así → falla el mecanismo de salto.
+- Resultado salto: la SALIDA corre (hook dispara) → el salto funciona y el
+  cb era el agujero. Pero el flip jamás (ni `0x6e4df4`): muere entre
+  `0x6e4ddc-0x6e4df4` cada vez, sin colgar el host. Switch con cases por pc:
+  los `goto` internos bypassean hooks → el flip podría correr invisible;
+  pero `a` nunca alterna → no corre (o toggle re-escrito).
+- Resultado callback (2026-10-06y): `endfn-6279D0` CORRE (n=1..5+). El SIF
+  async vive; el completado `4C38D8`+`ei` se ejecuta. El stall está aguas
+  abajo del callback.
+- Varianza entre corridas: sin spin (worker estacionado en `0x6e4cdc`,
+  dentro de 6E4848 que no retorna y no llega al spin). Candidatos: loops
+  `bc0f` (`0x6e4d24`, `0x6e4ac4`, flag C0 que nada pone). En curso
+  (2026-10-06z): fallthrough forzado en ambos (equivalencia exacta con DMA
+  síncrono). Si el worker avanza → era ese wait.
