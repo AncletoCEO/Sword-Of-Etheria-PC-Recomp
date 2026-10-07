@@ -412,6 +412,12 @@ A6.** Ninguna acción de esta sección se ejecutó.
   (blez→`0x627C48`); el consumo necesita `44>0`; los arrivals no existen.
   Todo en 0 = idle estable. Kickstart: `48=1` UNA vez en PRE; si el ciclo
   se autosostiene (real) → WIN.
+- Resultado kickstart: consumido (`48→0` por rama `v0==0`) sin progreso;
+  transfers 11, VRAM igual. El ciclo no se autosostiene.
+- Nuevo hilo (2026-10-06z3): `0x627F50` (44++) tiene callers en
+  `entry_006b16b0/1d0/8f4/9a4` (`0x6b16b0: si a1>0 → 627F50(a0=0x10060000,
+  a1=t0, a2=1)`), sin callers directos (¿handler de interrupción?
+  ¿vsync?). En curso: hooks exactos en `0x6b16b0` y `0x627f50`.
 - Varianza entre corridas: sin spin (worker estacionado en `0x6e4cdc`,
   dentro de 6E4848 que no retorna y no llega al spin). Candidatos: loops
   `bc0f` (`0x6e4d24`, `0x6e4ac4`, flag C0 que nada pone). En curso
