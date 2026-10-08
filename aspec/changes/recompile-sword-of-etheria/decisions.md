@@ -839,3 +839,24 @@ A6.** Ninguna acción de esta sección se ejecutó.
 - **Próximo**: ver quién debería instalar `cb` (`gp-0x7A30`) y quién pone
   `gp+0x5CF = 1` (escritores detectados: `0x511ef4`, `0x511f44`, `0x6e44e4`,
   `0x6e44fc`, `0x6e4644`, `0x6e690c`) — ahí está el freno real.
+
+### 2026-10-08 — `cb` nunca se instala y `5CF` nunca se resetea
+- **Escaneo del ELF** de escritores:
+  - **`cb`** (`gp-0x7A30`): **instalador `0x6e6934`** (`sw $a0,-0x7A30($gp)`) y
+    **desinstalador `0x6e6cf0`** (`sw $zero,-0x7A30($gp)`). Como en runtime
+    `cb=0` siempre ⇒ **el instalador no corre** (o se desinstala al toque).
+  - **`f5cf`** (`gp+0x5CF`): se **resetea a 0** en `0x6e690c`, dentro de una
+    función de **reset del motor de DMA** (`0x6e68e0..0x6e692c`: pone
+    `f630=0`, `f5cf=0`, `5dc/5e0/5e4/5e8/5ec=0`, `640=0`, tras `jal 0x4d3b98`).
+    Como seguimos viendo `f5cf=1`, **ese reset no corre**.
+- **Lectura**: el motor de DMA del juego **nunca se inicializa**
+  (`cb` sin instalar + `5CF` en 1 de fábrica) ⇒ el handler de DMA sale y el spin
+  gira sin consumidor. Eso explica los 32 kicks/60s.
+- **Próximo**: encontrar **quién llama** a `0x6e6934` (instalador de `cb`) y a
+  la función de reset `0x6e68e0`; si esas llamadas no ocurren, el gate son sus
+  condiciones/callers.
+- **Entorno (2026-10-08)**: se movieron los clones externos fuera del repo con
+  **symlinks** (el build los necesita en su ruta):
+  `tools/PS2Recomp → /home/lubonch/repos/_external/PS2Recomp`,
+  `ghidra-mcp → /home/lubonch/repos/_external/ghidra-mcp`; sus `.git` quedan
+  como `.git-off`. VS Code ya no los ve como repos.
