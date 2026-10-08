@@ -1085,3 +1085,25 @@ A6.** Ninguna acción de esta sección se ejecutó.
 - **Próximo**: instrumentar el **setup `0x6efd28`** (en el generado, copia
   `FUN_006cba48_p3`), sobre todo después del `jal 0x6e6640` (`0x6f0958+`), y ver
   qué deja en la cola / si debería llamar al productor.
+
+### 2026-10-08 — El setup corre pero **no encola** (`head == tail == 0`)
+- **Instrumentado** el setup en `FUN_006cba48_p3` (`post-reset` 0x6f0958, `sp1`
+  0x6f0964, `sp2` 0x6f0974, `sp3` 0x6f09e0, `sp4` 0x6f0a08):
+  ```
+  [GEN-B3] post-reset n=1 head=0x0 tail=0x0 f5cf=0
+  [GEN-B3] sp2        n=1 head=0x0 tail=0x0 f5cf=0
+  [GEN-B3] sp4        n=1 head=0x0 tail=0x0 f5cf=0
+  ```
+  (`sp1`/`sp3` **no** se ejecutan: el flujo toma otra rama.)
+- ⇒ El setup **corre** (post-reset → sp2 → sp4) y **deja la cola en
+  `head == tail == 0`**: **no encola**, y el productor sigue sin correr.
+- **Conclusión del hilo "motor de DMA"**: en nuestro recomp, **nadie llena la
+  cola** (`head == tail` desde el arranque; el setup no encola y el productor
+  sólo se alcanza desde el handler, que sale por `head == tail`). El motor
+  **nunca arranca** ⇒ no se generan frames con contenido (32 kicks/60s, todos
+  "clear" full-screen).
+- **Pregunta abierta (la que separa de la PS2 real)**: qué hace que en la
+  consola la cola tenga trabajo en el primer dispatch. Hipótesis: un DMA de
+  arranque (carga) que en nuestro recomp no deja el mismo estado, o un `head`
+  inicial distinto. `head` pasa a `0x80/0x90` recién **después** del setup
+  (escritor `0x6e4564`, interno del handler).
