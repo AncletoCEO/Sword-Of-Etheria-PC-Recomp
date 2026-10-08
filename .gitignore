@@ -40,8 +40,12 @@ ps2_log.txt
 
 # Tooling local de agentes/IDE (no versionar: config y memoria de la máquina)
 .agents/
+.commandcode/
 .opencode/
 .ancleto/
+
+# Renders/capturas del juego (contenido del juego: no versionar)
+frame_*.png
 
 # Nota: NO ignorar a propósito: game/, build_release.py, README.md, .github/
 # para que el release y CI sí se versionen.

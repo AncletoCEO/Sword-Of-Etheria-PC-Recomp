@@ -192,6 +192,56 @@ Ideas aplicables, en orden de coste:
    runtime HLE), no aporta patrón ejecutable: el atasco vive del lado
    feeder/dato, no del consumidor EE.
 
+### 8. Arquitectura de Suspensión y Preemption en Syscalls (`EeScheduler`) (2026-10-07)
+
+- **Problema de excepción C++ vs context.pc**: Los stubs recompiled de syscalls en `ps2_runtime` (`FUN_004d31c0` SleepThread, `FUN_004d31d0` WakeupThread, `FUN_004d32a0` WaitSema, etc.) ejecutan `handleSyscall()` y posteriormente asignan `ctx->pc = jumpTarget;` ($ra). Si el syscall invoca `blockCurrent()` o `transferIfRequested()`, se lanza la excepción `EeDispatcherTransfer{}` para ceder el control al loop del scheduler (`step()`).
+- **Consecuencia previa**: El desenrollado de la pila de C++ abortaba la función recompiled antes de que pudiera asignar `ctx->pc = $ra`. El contexto guardado del hilo retenía el PC del cuerpo del syscall (`0x4d31c0` / `0x4d31d0`). Al reactivarse, el scheduler reanudaba ejecutando nuevamente el syscall desde el inicio, causando un bloqueo infinito de re-invocación.
+- **Regla arquitectónica**: En `blockCurrent()` y `transferIfRequested()`, si el registro de retorno `$ra` (`getRegU32(&self->activeContext(), 31)`) es distinto de cero, debe asignarse inmediatamente `self->activeContext().pc = ra`. Esto emula con precisión la semántica de hardware de la CPU MIPS R5900, donde cualquier hilo suspendido en un syscall reanuda en su dirección de retorno `$ra`.
+
+### 9. Desbloqueo del Render Loop y Presentación (2026-10-07)
+
+- Al reanudarse correctamente Thread 1 y Thread 3, se desbloqueó el despacho SIF RPC (`sceSifCheckStatRpc` / `0x628950` / `0x628980`).
+- Thread 1 alcanzó el bucle principal de renderizado (`0x6d6a6c`), logrando la activación del **Double Buffering Flip a 60 FPS** (`dispfb1` alternando dinámicamente entre `0x1000` y `0x1080`).
+- Por primera vez se escribió contenido gráfico en la memoria de video de GS: **`vramNonZero = 262144 / 4194304` (256 KB)**, con resolución configurada por el motor a 512x512.
+
+### 10. A/B con PCSX2 y estado real del bloqueo (2026-10-07)
+
+- **Método (sin BIOS ni emulador en CI: es referencia local)**: PCSX2 2.8.2 +
+  BIOS `ps2-0220e-20060210.bin`, lanzado `-batch -fullscreen -fastboot` con el
+  ISO del repo (usuario pasa el diálogo inicial a mano); capturas con
+  `spectacle` cada 10 s. Config/evidencia en `/tmp/opencode/pcsx2{,b}/`.
+- **Secuencia real del juego**:
+  1. ~20 s — **primera pantalla**: diálogo **"Select video format — NTSC(60Hz)
+     / PAL(50Hz)"**, dibujado por el juego, esperando input (Cross).
+  2. ~70 s — **título**: logo *THE SWORD OF ETHERIA* sobre nubes +
+     **New Game / Load Game**.
+  3. ~120 s+ — **menú principal**: logo + arte de los 3 personajes +
+     **Quit Game / Save / Story Mode / ?????? / ??????**, ©2006 KONAMI.
+- **El juego renderiza desde el arranque**: el log muestra `microVU1: Cached
+  Prog` + `GL: Compiling vertex/pixel shader` desde ~10 s (VU1 + GS activos).
+- **Estado del recomp (mismo ISO, mismo ELF)**: arranca, carga todo el disco
+  (OL/CHARA/BG/EFFECT/INTER/EED..EEU.BIN) y presenta con double-buffer
+  (`dispfb1` alternando), pero **`gif=2` / `gsw=0` / `vif=6`**: **cero
+  geometría**, VRAM con un único clear alpha (`crt1 fbp=128: rgbNZ=0
+  aNZ=262144`). 10 min sin avanzar ⇒ **diverge antes del primer render**, o
+  sea el gate es temprano (no un state machine profundo).
+- **Hipótesis descartadas (2026-10-07)**:
+  - **Semáforo 3 / hilo 2**: `_init_sys` → `FUN_004d4078` crea el semáforo (id
+    3) + el hilo 2 (entry `0x4d3fa0`); los que lo señalan son
+    `FUN_004d4168/4200/4280` (`iSignalSema`) y **nunca se invocan** ⇒ es el
+    **thread de comandos SIF** del SDK, **idle por diseño** (nuestro HLE de
+    `sceSifCallRpc` puentéa el camino SIF del SDK). No es el gate.
+  - **Pad**: la primera pantalla pide input, pero el recomp **nunca llama
+    `scePadRead`** (solo `scePadInit`+`scePadPortOpen`) ⇒ no está esperando
+    input.
+- **Gap abierto**: `PADMAN`/`SIO2MAN`/`SIO2D`/`DBCMAN` cargan como **HLE**
+  ("physical IRX unavailable") aunque los `.IRX` están extraídos en
+  `work/elf/IOP/`; solo `LIBSD`/`SDRDRV`/`SDSTR3`/`SD_CALL`/`CDVDSTM`/`MC2_D`
+  cargan físicos. PCSX2 sí completa el intercambio de config del pad.
+- **Plan inmediato**: (1) diff de la secuencia de init (cargas CD, IRX, binds
+  SIF/RPC) PCSX2 vs recomp para ubicar la divergencia; (2) reparar la carga
+  física de `PADMAN`.
+
 ## Validation
 
 - **Fase 0**: `git --version`, `cmake --version` (>= 3.20), `cl` (MSVC C++20)

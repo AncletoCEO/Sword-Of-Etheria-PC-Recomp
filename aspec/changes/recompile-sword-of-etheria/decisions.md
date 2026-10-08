@@ -433,3 +433,347 @@ A6.** Ninguna acción de esta sección se ejecutó.
   Con pmode=0x8067 + dispfb1 alternando (0x1000/0x1080/0x1400) hay double-
   buffer real, pero frames negros (shot_1/shot_241 = 0px). El park es otro
   bloqueo. En curso: hook exacto en `0x4c1970` (dispatch worker thread).
+
+### 2026-10-07 — Corrida 10 min: sin avance; ico-pc evaluado
+- **Trigger**: hito = llegar al menú; corrida desatendida de 620s del build
+  actual (binario 20:28) con capturas cada ~10s.
+- **Resultado**: **REFUTADA** la hipótesis de "progresión lenta". En 10 min:
+  `tick` ~6240, `gif=2` / `gsw=0` / `vif=6` **constantes** (cero geometría),
+  VRAM siempre `262144/4194304` y **solo alpha** (`crt1 fbp=128: rgbNZ=0
+  aNZ=262144`), ~10 fps, sin crash. Frames negros. El juego nunca emite
+  VIF/GIF ⇒ el bloqueo está **aguas arriba del render**, no en el GS.
+- **Anatomía de hilos (vbprof, 37k muestras)**: hilo 1 (main, pri 25) corre
+  en `0x6279d0` (callback SIF `entry_00627994`), `0x628970` (cola del cliente
+  RPC `FUN_00628640` = `WakeupThread`), `0x51e7xx`/`0x6d51xx`; hilo 2
+  (`FUN_004d3fa0`, espera sema 3, st=2) y hilo 3 (`FUN_00628640+0x308`,
+  poll loop RPC con `SleepThread`, st=2) parkeados. Solo 3 hilos: main + 2.
+- **Corrección de dos lecturas previas**:
+  1. El hook de dispatch `0x4c1970`/`0x4c1900` (`mainGameLoopDispatch`) **NO
+     dispara** en la corrida (0 trazas); el main ya no pasa por ahí.
+  2. Forzar el estado del driver de sonido `2→5` en `0x6e8870` es **callejón
+     sin salida**: verificado en el C++ generado, `state&7==2` es la rama
+     **activa** (`0x6e88d8`, arma/encola comandos de sonido en `gp+0x5C0`) y
+     `==5` es la rama **idle** que retorna 0. Forzar apaga el trabajo. No
+     reintentar.
+- **ico-pc (nathanialf/ico-pc)**: es un **port de decompilación** de ICO
+  (corre C del juego), con **renderer Vulkan propio** (`port/render/rd_*.c`)
+  y scheduler de fibras (`port/platform/sched.c`); **no es HLE** como
+  PS2Recomp, así que su render no transfiere. Aprovechable solo como
+  **semántica de referencia** de SDK en `sce/libkernl/` (thread.c,
+  sifrpc.c) ante una duda puntual. No aporta fix directo a este blocker.
+- **Siguiente (a dirimir)**: el gate espera una condición que el runtime no
+  satisface. Dos candidatos: (a) el state machine de escena principal no
+  avanza; (b) el semáforo 3 (1 waiter, idle) nunca se postea y strandea un
+  paso. Instrumentar el escalón de escena + el semáforo 3.
+
+### 2026-10-07 — Traza de semáforos: hilo 2 = thread de comandos SIF (no es el gate)
+- **Instrumentación** (`swordOfEtheriaSyscallStub`, TRIAGE-sema): log de
+  TODA op 64..70 con el `ra` del que llama + id de CreateSema. Rebuild
+  runtime + relink OK (4m39s).
+- **Resultado (smoke 90s)**: secuencia de creación `CreateSema -> id=1,2`
+  (CRT0), `id=3` (SDK), `id=4..7` (CDVD), `id=8` (pad), `id=9`.
+  `op=68 sema=3 ra=0x4d3fe8` **una vez** (hilo 2, WaitSema) y **cero
+  señales a sema 3** (ningún `op=-67 sema=3`).
+- **Identificación**: `FUN_004d4078` (llamado por `_init_sys` = `0x4dd618`)
+  crea `CreateSema(maxCount=255, init=0)` → id 3 + `CreateThread(entry=
+  0x4d3fa0)` + `StartThread`. El hilo 2 hace `WaitSema(3)`. Los que
+  **señalan** sema 3 son `FUN_004d4168/4200/4280` vía `iSignalSema`
+  (`0x4d32d0`, syscall -67) — **ninguno se invoca**: es el **thread de
+  comandos SIF del SDK** y está **idle por diseño** (nuestro HLE de
+  `sceSifCallRpc` puentéa el camino SIF del SDK, así que nunca se encola un
+  comando). **Descartado como gate.**
+- **Bug latente real (no bloqueante hoy)**: el cuerpo del hilo 2 en
+  **`0x4d3fe8–0x4d4078` NO está recompilado** (Ghidra cerró `FUN_004d3fa0`
+  en el `jal` de `0x4d3fe0`; el hueco de 36 instrucciones es código real
+  —loop worker que lee una cola y despacha). Si algún día se señalara sema 3,
+  el hilo resumiría en `0x4d3fe8` → función inexistente. Anotado para el día
+  que se toque el thread SIF.
+- **Estado**: el gate sigue siendo **aguas arriba del render** (main corre en
+  `0x51xxxx`/`0x6d5xxx` y solo pollea `sid=0x573 rpc=0`). No descartar el
+  audio/streaming. Próximo: A/B con PCSX2 (comportamiento esperado en este
+  punto) o instrumentar el state machine de escena.
+
+### 2026-10-07 — A/B con PCSX2 (referencia real del arranque) ✅
+- **Setup**: PCSX2 2.8.2 (`pacman -S pcsx2`), BIOS `ps2-0220e-20060210.bin`,
+  FastBoot. Lanzado `-batch -fullscreen -fastboot` con el ISO del repo;
+  capturas con `spectacle` cada 10s. Config: `/tmp/opencode/pcsx2{,b}/`.
+- **Secuencia real observada**:
+  1. **~20s: primera pantalla del juego** = diálogo **"Select video format —
+     NTSC(60Hz) / PAL(50Hz)"** (lo dibuja el juego), esperando input.
+  2. **~70s (tras apretar Cross): título** = logo *THE SWORD OF ETHERIA*
+     sobre nubes + menú **New Game / Load Game**.
+  3. **~120s+: menú principal** = logo + arte de los 3 personajes +
+     **Quit Game / Save / Story Mode / ?????? / ??????**, ©2006 KONAMI.
+- **Rendering**: el log de PCSX2 muestra `microVU1: Cached Prog` + `GL:
+  Compiling vertex/pixel shader` desde ~10s ⇒ **el juego renderiza 2D/3D
+  real desde el arranque** (VU1 + GS). Nuestro recomp no emite nada.
+- **Implicancia**: el hito "llegar al menú" = **esas dos pantallas**
+  (título + menú principal). Nuestro recomp diverge **antes del primer
+  render**; el gate no es profundo (es un juego que dibuja ya en boot).
+- **Descartado también (este turno)**: el **pad**. La primera pantalla
+  requiere input, pero en nuestro recomp el juego **nunca llama
+  `scePadRead`** (0 líneas; solo `scePadInit`+`scePadPortOpen`) ⇒ no está
+  esperando input.
+- **Gap detectado (no necesariamente el gate)**: `PADMAN`/`SIO2MAN`/`SIO2D`/
+  `DBCMAN` cargan como **HLE** ("physical IRX unavailable") aunque los
+  `.IRX` están extraídos en `work/elf/IOP/`; solo LIBSD/SDRDRV/SDSTR3/
+  SD_CALL/CDVDSTM/MC2_D cargan físicos. PCSX2 sí hace el intercambio de
+  config del pad ("DS2 Config Finished").
+- **Próximo**: diff de la **secuencia de init** (CD/SIF/IOP) PCSX2 vs
+  recomp para ubicar el punto de divergencia; y/o reparar la carga física de
+  PADMAN (el único core en HLE).
+
+### 2026-10-07/08 — Diff de init PCSX2 vs recomp: **el juego carga los IRX él mismo**
+- **Método**: PCSX2 con `EnableVerbose/EnableEEConsole/EnableIOPConsole = true`
+  + `-logfile`; corrida de 45s (config del usuario respaldada y restaurada).
+- **Secuencia real (PCSX2)**: `ELF executing` a `t=4.01s`; **`loadmodule` ×11 a
+  t=4.48–5.79s** (0.47s tras la entrada), en este orden: `SIO2MAN, PADMAN,
+  SIO2D, DBCMAN, MC2_D, CDVDSTM, LIBSD, SDRDRV, LIBSMF2, SDSTR3, SD_CALL`,
+  todos `ret 0/2` (OK). Además RPC registrados por los IRX (`80000592/59a/593/
+  597/595/59c/80000006/...`).
+- **Nuestro recomp**: **0 llamadas a `SifLoadModule`** (0 líneas
+  `load-emulated`); el recomp **precarga** los IRX en `sceSifInitRpc`
+  (`[iop-preload]`) y **saltea** el camino real.
+- **Verificación**: desensamblé el CRT0 que salteamos (`0x4c008c→0x4c0218`):
+  es exactamente el startup que los overrides ya emulan (clear FPU `mtc1`,
+  clear BSS `0xA27C80–0xA93700`, gp/sp, `syscall 60` SetupThread, `syscall 61`
+  SetupHeap, `jal 0x4dd618` `_init_sys`, `jal 0x4d3520`, `ei`, argc
+  `0xA31D00`, `jal 0x51FEA0`, `j 0x4c1900`). **No** contiene LoadModule ⇒ el
+  loader vive en otra parte (init del SDK / código no ejecutado).
+- **Dónde está el loader**: tabla de nombres de módulos en el ELF
+  `0x51B0A8` (`sio2man.irx`, `padman.irx`, `sio2d.irx`, `dbcman.irx`,
+  `mc2/mc2_d.irx`, `cdvdstm.irx`, `libsd.irx`, `sdrdrv.irx`, …) y
+  **`0x51B130` = `cdrom0:\IOP\IOPRP300.IMG`** ⇒ el juego carga el **bundle
+  IOPRP300.IMG** + módulos por nombre. Los `.IRX`/`IOPRP300.IMG` están en
+  `work/elf/IOP/`.
+- **Conclusión**: divergimos en el **arranque del sistema de IOP** — la
+  sustitución (preload propio, orden distinto, 4 módulos a HLE) reemplaza el
+  camino real del juego. **Próximo**: ubicar/re-habilitar el loader propio del
+  juego (o hacer el preload fiel: IOPRP300.IMG + orden de PCSX2 + carga
+  física) y ver si con eso el juego pasa al primer render.
+
+### 2026-10-08 — Preload fiel: los 11 IRX cargan físicos (pero el render sigue en cero)
+- **Cambio** (`game_overrides.cpp::preloadIopBootModules`): orden **real de
+  PCSX2** (SIO2MAN, PADMAN, SIO2D, DBCMAN, MC2_D, CDVDSTM, LIBSD, SDRDRV,
+  LIBSMF2, SDSTR3, SD_CALL) y se intenta **primero** `cdrom0:/IOP/<name>`
+  (físico) para **todos**, con fallback a host/HLE. Comentario obsoleto
+  corregido (el juego **sí** llama LoadModule).
+- **Resultado (smoke 90s)**: **los 11 cargan físicos** (`via=cdrom0`):
+  SIO2MAN 1, PADMAN 2, SIO2D 3, DBCMAN 4, MC2_D 5, CDVDSTM 6, LIBSD 7,
+  **SDRDRV 8** (`[IOP Kprintf] SDR driver version 4.0.1 (C) SCEI`),
+  LIBSMF2 9, SDSTR3 10, SD_CALL 11; `TYOSD real=8`. **Cero HLE** para
+  PADMAN/SIO2MAN/SIO2D/DBCMAN (antes 0x40000000+).
+- **Pero**: geometría **sigue en cero** — `gif=2`, `gsw=0`, `vif=6`,
+  `vramNonZero=262144` (solo alpha), `activeThreads=3`. El IOP correcto era
+  **necesario pero no suficiente**: el gate está en otro lado.
+- **Nota de toolchain**: `cmake` desapareció del sistema (no está en
+  `/usr/bin` ni en pacman; `make`/`gcc`/`ninja` sí). Build puenteado con
+  `make CMAKE_COMMAND=/bin/true` + `ar`/`c++` desde los `link.txt`. **Pedir al
+  usuario `sudo pacman -S cmake`** para builds normales.
+- **Próximo**: probar el camino **IOPRP300.IMG** real (el juego referencia
+  `cdrom0:\IOP\IOPRP300.IMG` en `0x51B130`) y/o atacar el gate del render
+  (state machine de escena / handshake de audio).
+
+### 2026-10-08 — Datos del CD: **válidos** (hipótesis "escena corrupta" refutada)
+- **Instrumentación** (`cdReadStub` 0x4cfa80, TRIAGE-CD): volcado de los
+  primeros 32 B del destino tras cada `sceCdRead`.
+- **Resultado**: los reads devuelven datos **correctos** — cabeceras `SIMB`
+  (formato KONAMI, p.ej. `53 49 4d 42`, size `0x19`) y nombres reales
+  (`mission16.bin`, `mission01.bin`, `str01000201.bin`, `str03011000.bin`,
+  `str07010000.bin`). El subsistema de CD/load **está bien**.
+- **Nota**: `cmake` reinstalado por el usuario (4.4.4); el build normal
+  (`cmake --build`) vuelve a funcionar.
+- **Descartados hasta ahora**: hilos/semáforo 3 (SIF cmd thread idle),
+  pad (`scePadRead` nunca se llama), módulos IOP (ahora físicos), datos del
+  CD (válidos), `loadedModules=[]` (campo de diagnóstico, red herring).
+- **Único comportamiento anómalo persistente**: el **macro-spin de audio**
+  (TYOSD `rpc=0` ×2693 + `FLIP` ×2680 + `libsd:6` ×692 en 60s), **igual que
+  antes** del fix de IOP. El main loop corre y hace flip, pero **no emite
+  draws** (`gif=2`, `gsw=0`, `vif=6`).
+- **Triages activos a revertir cuando se cierre**: `triage-sema`,
+  `cdread-data`, `[gen-*]`.
+
+### 2026-10-08 — Audio descartado como gate (HLE de TYOSD desactivable)
+- **Cambio**: `SWORD_TYOSD_HLE=0` en `sifCallRpcStub` desactiva el HLE de
+  `sid=0x573` y deja pasar el **RPC real** (ahora que SD_CALL/SDRDRV cargan
+  físicos). Reversible, sin recompilar.
+- **A/B (65s)**: con HLE off el **poll-storm desaparece** — 34 `rpc=0` vs
+  **2693** con HLE, y aparece `rpc=0x30000` real. O sea: **el HLE causaba el
+  macro-spin del audio (iatrogenia)**. La actividad se normaliza.
+- **Pero**: geometría **sigue en cero** (`gif=2`, `gsw=0`, `vif=6`, VRAM solo
+  alpha) y no hay draws ⇒ **el audio NO es el gate del render**. Descartado
+  "en el peor caso" (era el objetivo).
+- Nota: con HLE off los tags `[TYOSD-*]`/`FLIP` no se emiten (están dentro de
+  la rama HLE), así que no sirven para comparar progreso.
+- **Dato extra**: el texto del juego ("Select video format", "Story Mode", …)
+  **no está en el ELF** ⇒ viene en los datos (comprimido); no se puede ubicar
+  el renderer del diálogo por strings.
+- **Estado**: el gate sigue en la **lógica EE del juego** (corre main loop y
+  regs de display, pero no arma/envía draws).
+
+### 2026-10-08 — REENCUADRE: el juego **SÍ dibuja** (sprites), pero salen negros
+- **Corrección de una lectura previa**: "cero geometría" era **falso**. El
+  contador `gif`/`gsw` no captura este camino. El GS **recibe kicks**:
+  `[gs:kick] drawing=1 prim=6 vtxCount=1/2` (prim=6 = **sprite**, 2 vértices).
+- **El log está CAPEADO** (`gs_frontend.cpp:1534`, `debugIndex < 96u`) ⇒ el
+  "96 kicks" (idéntico en 65s y en 10min) **no es el total**; no sabemos
+  cuántos dibuja de verdad sin instrumentar.
+- **El juego además hace setup GS real**: `sceGsSetDefDispEnv`,
+  `sceGsResetPath`, `sceDmaReset`, `GsPutIMR` (new=0x65280), y
+  `sceDmaSend chain kick: chan=0x10009000`.
+- **Pero** VRAM queda con **RGB=0** (`crt1: rgbNZ=0 aNZ=262144`) y `gsw=0` ⇒
+  los sprites se emiten y **se rasterizan en negro**: el problema probable
+  está en el **backend GS** (color de vértice / muestreo de textura / destino
+  de rasterizado), **no** en la lógica del juego.
+- **Próximo**: (a) sacar el cap / loguear el total de kicks periódicamente;
+  (b) loguear color y posición de los vértices del sprite para ver por qué no
+  aporta RGB (¿RGBAQ/PRIM sin llegar? ¿TEX0 muestreada negra?).
+
+### 2026-10-08 — El **backend GS funciona**; el juego **nunca dibuja contenido**
+- **Prueba del backend**: forzando `rgba=(255,0,0,255)` en los kick de vértice,
+  los sprites **se rasterizan** (pantalla roja a pantalla completa; VRAM pasa
+  de 262144 a **2093058/4194304**). El problema **no** es el rasterizador.
+- **Estado real de los draws** (instrumentado en `gs_frontend.cpp`):
+  - `[gs:rgbaq] write#N rgba=(0,0,0,0)` — el juego **escribe RGBAQ siempre en
+    (0,0,0,0)**.
+  - `[gs:triage] kick#N prim=6 tme=0 abe=0 ctxt=0 uv=(0,0) tex0(tbp0=0 tbw=0
+    psm=0 tw=0 th=0)` — todos los picks son **sprite sin textura**.
+  - Contadores (sin cap, 60s): `gs:content` **vacío** ⇒ **cero** kicks con
+    color ≠ 0 y **cero** con `tme=1`.
+- **Conclusión**: el juego emite un patrón de sprites negro-transparente sin
+  textura (fade/clear de presentación) y **nunca llega a dibujar el contenido**
+  (texto/imágenes del diálogo, que irían con `tme=1`). Es decir: **el backend
+  GS no es el gate**; el juego **no genera la lista de dibujo real** (o no la
+  envía por el camino que llega a `vertexKick`).
+- **Próximo**: como el juego en PCSX2 sí dibuja texto (texturas), falta
+  determinar si (a) el juego está en un fade y no avanza de escena (gate
+  lógico), o (b) los draws reales viajan por **VU1/path3** y no llegan a
+  `vertexKick` (nuestro `vif=6` sugiere casi nulo tráfico VIF1).
+
+### 2026-10-08 — El pipeline VU1 SÍ está activo; el color sale 0 (sospecha: VU1 core)
+- **Histograma DMAC** (`[dma:chans]`, agregado en `ps2_memory.cpp`): en ~60s
+  **ch9 (VIF1) ≈ 1933**, **ch10 (GIF) = 2**, **ch13 (SPR_FROM/scratchpad) ≈ 3065**.
+  ⇒ el juego **sí sube datos a VIF1** y hace **mucho DMA desde scratchpad**
+  (patrón típico de **VU1 volcando resultados**). `m_vifWriteCount` (MMIO) no
+  lo capturaba: el tráfico va por **DMA**, no por registros.
+- **Atajo probado**: forzar un color visible en **todos** los kicks ⇒ la
+  pantalla se pinta **full-screen** (blanco/rojo) ⇒ los draws que llegan son
+  **fades/clears de pantalla completa**, no geometría del diálogo. El atajo
+  **no reveló contenido**; ya revertido.
+- **Conclusión**: el camino **VIF1 → VU1 → XGKICK → GS** está activo; los
+  vértices llegan al GS con **RGBAQ=(0,0,0,0)** y `tme=0`. El color/estado se
+  **calcula en VU1**, así que el sospechoso principal es la **emulación de
+  VU1** (microcódigo del juego que produce color 0 / no llega a la escena).
+- **PRECAUCIÓN**: el mapa DMAC de este runtime trata `0x10009000` como VIF1 y
+  `0x1000A000` como GIF; `0x1000D000` = SPR_FROM. Verificar contra el mapa
+  canónico del EE DMAC antes de sacar conclusiones de canal.
+- **Próximo**: instrumentar el **VU1** (¿se carga/ejecuta el microcódigo del
+  juego? ¿instrucciones no soportadas que dején el color en 0?) y/o comparar
+  con un **GS dump de PCSX2** del primer frame real.
+
+### 2026-10-08 — El VU1 ejecuta bien; el juego **casi no lo arranca** (3 MSCAL en 60s)
+- **Instrumentado** `setVu1MscalCallback`/`setVu1MscntCallback`
+  (`ps2_runtime.cpp`): `[vu1:mscal]/[vu1:mscnt]` con startPc/endPc/cycles/stopD/stopT.
+- **Resultado (60s)**:
+  - El VU1 **sí ejecuta**: `endPc=0x168`, `stopD=0 stopT=0` (termina solo),
+    **0 instrucciones reservadas** (`reportReservedInstruction` nunca dispara y
+    detendría el VU1 con `RUNTIME_ERROR`).
+  - **Genera paquetes GIF**: `[gs:gif] idx=N size=2576/1136 nreg=3
+    ctx0fbp=128 ctx1fbp=128` ⇒ **VIF1 → VU1 → XGKICK → GS funciona**.
+  - **Pero**: solo **3 MSCAL + 5 MSCNT en 60s** ⇒ el juego **no tiene un loop de
+    render** (serían miles/frame). Los draws vistos (sprites pantalla-completa
+    con color 0) son esos pocos arranques.
+- **Conclusión (la más fuerte hasta ahora)**: **todo el pipeline de rendering
+  funciona** (GS rasteriza, VU1 ejecuta, XGKICK entrega) y **el gate es lógico**:
+  el juego corre su main loop (miles de iteraciones) pero **no llega a emitir la
+  escena** (no llama a renderizar). Se descartan VU1/GS/DMA/VIF como causa.
+- **Próximo**: atacar el **estado del juego** (¿en qué fase se queda?) —
+  comparar con PCSX2 y/o instrumentar el scene/state manager. Ya no queda
+  hardware por descartar.
+
+### 2026-10-08 — El kick del render sale de `0x6e4468` y se ejecuta **3 veces en 60s**
+- **Instrumentado**: agregado `eePc`/`eeRa` al log de `[vu1:mscal]`
+  (`ps2_runtime.cpp`). Las 3 MSCAL salen **siempre** de
+  **`eePc=0x6e4468`, `eeRa=0x6e4ebc`**.
+- **Qué es `0x6e4468`** (leído en `work/generated/FUN_004eb8d0_0x4eb8d0_p41.cpp`):
+  ```
+  0x6e4460  srl  $v0,$v0,6
+  0x6e4464  ori  $v0,$v0,0x101
+  0x6e4468  sw   $v0,0($s1)   ; <-- CHCR del DMA VIF1 (0x101 = start)
+  ```
+  ⇒ es el **kick del DMA a VIF1** (el que lleva el paquete con el MSCAL). La
+  región `0x6e4xxx` (que el team había rotulado "audio") es en realidad parte
+  del **envío de render**.
+- **Dato decisivo**: ese kick se ejecuta **3 veces en 60s** (el juego real
+  haría miles). ⇒ **el juego no está ejecutando su loop de render**; corre un
+  loop (miles de iteraciones de `0x6e4cc0`) pero **se saltea/estanca antes de
+  mandar el paquete VIF1**. (Nota: los 1933 DMA a "ch9=VIF1" del histograma
+  deben ser de otro camino/contabilidad del runtime; el kick del juego es raro.)
+- **Conclusión**: **todo el hardware/emulación está descartado**. El gate es la
+  **lógica del juego**: no llega a la fase que manda el paquete de render.
+- **Próximo**: instrumentar la condición que gobierna el path hacia
+  `0x6e4468` (`0x6e4438`/`0x6e4444`: ramas por `$v1 & 0x300` y `$a1`) para ver
+  por qué casi nunca se toma.
+
+### 2026-10-08 — CORRECCIÓN: `eePc` del MSCAL es engañoso; `0x6e4440` **nunca** se ejecuta
+- **Instrumentado** en el **generado** (`FUN_004eb8d0_0x4eb8d0_p41.cpp`,
+  `label_6e4440`, `fprintf`): contaba visitas + condición `v1 & 0x300`.
+- **Resultado**: **cero** líneas `[triage-6e44]` en 60s (verificado que el
+  string está en el binario y en el `.o`: la instrumentación **sí** está viva).
+  ⇒ **`0x6e4440` (y por lo tanto los dos paths a `0x6e4468`/`0x6e448c`) nunca se
+  ejecutan**.
+- **Corrección de la entrada anterior**: como el DMA se **procesa diferido**,
+  `cpuContext->pc` en el callback MSCAL **no es el sitio del kick** (es sólo
+  dónde estaba el EE cuando el runtime drenó la transferencia pendiente).
+  `eePc=0x6e4468` **no** implica que ese `sw` haya corrido.
+- **Conclusión**: **no sabemos todavía de dónde sale el kick del VIF1**. Lo que
+  sí queda firme: el render se dispara poquísimas veces (3) ⇒ el juego no está
+  renderizando frames.
+- **Próximo (opciones)**: (a) instrumentar el **enqueue del DMA VIF1** con el
+  pc del EE (requiere plumbing de `ctx` a `writeRegister`, o loguear en el
+  `Store32` de `PS2Runtime` cuando `addr` ∈ canal VIF1); (b) buscar la función
+  que arma los paquetes GIF del juego por otra vía (p.ej. hooks en las
+  funciones `sceDmaSend`/`sceGs*` del juego con su caller).
+
+### 2026-10-08 — Sitio REAL del kick de render: `pc=0x6e4468` (32 kicks/60s)
+- **Instrumentado** `PS2Runtime::Store32` (`ps2_runtime.cpp`): si
+  `vaddr == 0x10009000` (CHCR VIF1) y bit de start (`0x100`) ⇒ log `pc`/`ra`
+  del EE. **Este sí es el sitio real** (no diferido).
+- **Resultado (60s)**:
+  - `n=1`: `pc=0x4d07a8` (el `sceDmaSend` del SDK, arranque).
+  - `n=2..`: **`pc=0x6e4468`**, `ra=0x6e4ebc`/`0x6e481c`, `CHCR=0x145`,
+    `madr=0x0 qwc=0`, con `[gs:gif] size=32 nloop=1 nreg=1` (paquetes chicos =
+    clears/rects).
+  - Total: **32 kicks en 60s** ⇒ el juego **casi no renderiza** (confirmado).
+- **Contradicción a aclarar**: `pc=0x6e4468` se ejecuta, pero `0x6e4440`
+  (que lo precede en el flujo) **nunca** ⇒ o el código salta directo a
+  `0x6e444c/0x6e4460`, o **la copia ejecutada no es la del archivo p41**
+  (los "monsters" `FUN_004eb8d0`/`FUN_006cba48`/`FUN_006cc380`/`FUN_006cc400`
+  contienen el mismo rango y pueden estar duplicados). Verificar antes de
+  instrumentar el generado otra vez.
+- **Próximo**: inspeccionar la función en **`ra=0x6e481c`** (la que llama al
+  path del kick) y su condición; es ahí donde vive el gate del render.
+
+### 2026-10-08 — El kick sale del **handler de DMAC del juego** (`0x6e4068`)
+- **Confirmado: hay 4 copias** del rango `0x6e4xxx` (mismo código en
+  `FUN_004eb8d0_p41` / `FUN_006cba48_p2` / `FUN_006cc380_p2` /
+  `FUN_006cc400_p2`) ⇒ **instrumentar el generado es frágil** (mi edición en
+  `p41` no era la copia ejecutada). De ahora en más: preferir **`Store32`** (que
+  da el `pc` real) o **desensamblar el ELF**.
+- **Desensamblado del ELF** en `0x6e47c0..0x6e4844`: la función del kick es
+  **`0x6e4068`** — y el propio log la marca como **handler de interrupción
+  DMAC** (`[ee-irq] add dmac cause=1/2 handler=0x6e4068`). Su lógica:
+  `lw $v1,0x3C0($v0)` → `beq $v1,0 → 0x6e4814` (rama alternativa) o kick GIF
+  (`sw` a `0x1000A030/0x1000A020/0x1000A000`).
+- **IRQ de DMAC** (`EeScheduler::dispatchIrq(dmac,cause)`): en 60s
+  **`dispatch dmac cause=1` ≈ 1200** (canal **VIF1**) y **`cause=2` = 0**
+  (canal **GIF**). El runtime **sí** encola `cause=2` al completar un DMA GIF
+  (`ps2_memory.cpp` `hadGif → queueCompletedDmacCause(2)`) ⇒ nunca completa un
+  DMA GIF porque **el juego casi no usa ese canal** (solo 2 DMA al GIF).
+- **Conclusión**: el juego manda sus paquetes por **VIF1** (XGKICK) y su kick
+  es parte del **handler de DMA** — pero lo ejecuta **32 veces/60s** ⇒ **el
+  juego no está renderizando frames**. El gate está en la **lógica de la
+  aplicación**, no en el DMAC/IRQ.
+- **Próximo**: dado que hardware, IRQ y emulación están descartados, volver al
+  **estado del juego**: comparar con PCSX2 (qué debería estar pasando a los
+  ~20s) o instrumentar el scene/state manager del juego.

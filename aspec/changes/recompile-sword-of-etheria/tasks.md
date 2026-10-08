@@ -67,6 +67,38 @@
 - [ ] Servir `SD.BIN` según comando de 16 B una vez conocido su layout (destino guest + tamaño); verificar datos en destino y avance de cola (`a==b` estable)
 - [ ] Drenar cola y revertir triages (`triage-vis`, `triage6e4d98`, `libsd→v0=1`): `gif>2` sostenido, VRAM con escena sin magenta, menú visible; recién ahí tag `v0.1.0`
 
+## Fase 4.7 — Desbloqueo de salida visual y coordinación multi-hilo EE/IOP (2026-10-07)
+
+- [x] **Diagnóstico de VBlank acelerado**: ajuste de frecuencia de log en `triage6e45d8wrap` de 10s (600 VBs) a 1s (60 VBs) para inspección de scheduling en tiempo real (`tools/PS2Recomp/ps2xRuntime/src/lib/game_overrides.cpp`).
+- [x] **Auditoría y corrección de truncamientos de Ghidra en rango `[0x4c0000, 0x4eb8d0)`**:
+  - `FUN_004c6020`: restaurado branch delay slot y epílogo (`jr $ra; addiu $sp, $sp, 0x20`).
+  - `FUN_004d39a0`: completado epílogo (`jr $ra; addiu $sp, $sp, 0x40`).
+  - `FUN_004d73e8` (`sceSifCheckStatRpc`): retorno inmediato a `$ra`.
+  - `FUN_00628980` (`WaitThread3Complete`): restaurados `$s0`, `$ra` y ajuste de `$sp`.
+  - `FUN_004d3730`: reconstruidas 12 instrucciones truncadas de DMAC `D_STAT` canal GIF (bit 2), sincronización y encadenamiento con `entry_004d3770`.
+  - `FUN_004c18f0`: restaurado `lw $v0, 7152($v1)` en delay slot y retorno a `$ra`.
+  - `FUN_004d3960`, `FUN_004d3988`, `FUN_004d3998`, `FUN_004d3aa0`, `FUN_004d3ac8`: restaurados epílogos, delay slots y retornos.
+- [x] **Corrección arquitectónica en `EeScheduler` (`blockCurrent` y `transferIfRequested`)**:
+  - Descubierto que `throw EeDispatcherTransfer{}` abortaba funciones recompiled de syscalls antes de asignar `ctx->pc = $ra`, congelando el hilo en el PC del syscall (`0x4d31c0` / `0x4d31d0`) y ciclando en bucle infinito.
+  - Implementado `self->activeContext().pc = ra` en `blockCurrent()` y `transferIfRequested()` (`tools/PS2Recomp/ps2xRuntime/src/lib/Kernel/EeScheduler.cpp`), garantizando reanudación correcta en el llamador.
+- [x] **Desbloqueo de VRAM y pipeline de presentación**:
+  - Hilo 1 superó la sincronización con Hilo 3 y alcanzó el render loop principal (`0x6d6a6c`).
+  - Activado **Double Buffering Flip a 60 FPS** (`[TYOSD-ab] ... FLIP`, alternando `dispfb1` entre `0x1000` y `0x1080`).
+  - Hito alcanzado: **`vramNonZero = 262144 / 4194304` (256 KB)** por primera vez.
+  - Métricas smoke (35s): `tick_max=2066`, `transfers_30000=11`, `muestras=203`, capturas 512x512 en `/tmp/opencode/shot_vb_*.bmp`.
+
+## Fase 4.8 — A/B con PCSX2 y convergencia al primer render (2026-10-07)
+
+> Referencia real (PCSX2): diálogo de formato de video → **título** → **menú principal** (Quit Game/Save/Story Mode). El recomp debe reproducir esas pantallas. El juego real **renderiza desde ~10s**; el recomp emite **cero geometría**.
+
+- [x] Traza de semáforos en `swordOfEtheriaSyscallStub`: **descartado** el semáforo 3 / hilo 2 (thread de comandos SIF del SDK, idle por diseño); detectado bug latente: **`0x4d3fe8–0x4d4078` sin recompilar** (cuerpo del hilo 2).
+- [x] Corrida de 10 min del build actual: **sin avance** (`gif=2`, `gsw=0`, `vif=6`, VRAM solo alpha) ⇒ el gate está **aguas arriba del render**.
+- [x] A/B con PCSX2 (2.8.2 + BIOS `ps2-0220e-20060210.bin`): capturada la referencia (diálogo de formato / título / menú principal) y verificado que el juego renderiza (microVU1 + shaders GL) desde ~10s.
+- [x] Descartado el pad como gate: el recomp nunca llama `scePadRead` (solo `scePadInit`+`scePadPortOpen`).
+- [ ] Diff de la secuencia de init (cargas CD, IRX, binds SIF/RPC) PCSX2 vs recomp para ubicar la divergencia.
+- [ ] Reparar carga física de `PADMAN` (hoy HLE; los `.IRX` están extraídos en `work/elf/IOP/`).
+- [ ] Hito: título + menú principal visibles en el recomp (cierra L60).
+
 ## Herramientas de debug (2026-10-05)
 
 - [x] `game/smoke_report.py`: corre el binario con timeout y resume tick/gif/VRAM, modo audio (polls vs transfers), spin `0x6e4d98`, unhandled imports, triages y causa de salida con veredicto (verificado 2026-10-05: corrida 30s → TRANSFER correcto)
