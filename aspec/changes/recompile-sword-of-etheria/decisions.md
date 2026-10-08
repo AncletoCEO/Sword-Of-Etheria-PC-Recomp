@@ -777,3 +777,25 @@ A6.** Ninguna acción de esta sección se ejecutó.
 - **Próximo**: dado que hardware, IRQ y emulación están descartados, volver al
   **estado del juego**: comparar con PCSX2 (qué debería estar pasando a los
   ~20s) o instrumentar el scene/state manager del juego.
+
+### 2026-10-08 — **GATE ENCONTRADO**: el handler de DMA sale por `gp+0x638 == gp+0x63C`
+- **Desensamblado del ELF** (`0x6e4068`, el handler de DMAC del juego):
+  ```
+  0x6e4074  addiu $v0,$0,-1
+  0x6e40e8  lw    $a1,0x638($gp)
+  0x6e40ec  lw    $v0,0x63C($gp)
+  0x6e40f0  beq   $a1,$v0,0x6e4590   ; <-- si 638==63C -> EPILOGO (no procesa DMA)
+  0x6e40fc  bne   *(gp+0x5CF),0,0x6e4590
+  ```
+  (`0x6e4590` es el epílogo: restore + `jr $ra`.)
+- **Evidencia del log**: `[TYOSD-ab] ... 638=0xb15a90 63c=0xb15a90` ⇒ **son
+  iguales** ⇒ el handler de DMA del juego **retorna sin procesar nada** ⇒ no
+  manda paquetes ⇒ **no renderiza**. (Coincide con los 32 kicks/60s.)
+- **REINTERPRETACIÓN CLAVE**: los campos `gp+0x638/0x63C` (y `0x630`, `0x5CF`)
+  que el equipo venía instrumentando bajo la etiqueta **"TYOSD/audio"** son en
+  realidad la **cola de DMA/render del juego** (los lee su handler de DMAC).
+  Toda la saga de "la cola de audio no drena" era, en realidad, **la cola de
+  DMA del motor**.
+- **Próximo**: entender qué llena `gp+0x638/0x63C` (el productor de la cola de
+  DMA) y por qué quedan iguales; y qué es `gp+0x5CF` (flag que también frena).
+  Ese es el camino directo al primer frame.
