@@ -1428,3 +1428,14 @@ A6.** Ninguna acción de esta sección se ejecutó.
 - **Nota de mantenimiento**: quedan **4 triages activos** para limpiar al cerrar:
   `[motor]`+`SWORD_RDRAM_DUMP`, `cb-install`/`SWORD_CB_PRODUCER`, `[cdread-data]`,
   y los `fprintf` `[GEN]`/`[triage-*]` del generado.
+
+### 2026-10-08 — Búsqueda agotada (ELF + runtime + generado)
+- El **generado** (2.1 GB) **tampoco** contiene `0x55555555` (grep con `-l`/`-c`
+  sin coincidencias) ⇒ ese valor lo **escribe el juego en runtime** (y por el
+  corrimiento `+0x150` cae en otro offset que en la consola).
+- **Búsqueda cerrada**: el mecanismo detrás de `0xA988C0`/el corrimiento **no se
+  resuelve más por análisis estático** — hace falta un breakpoint (PCSX2) o un
+  A/B en **fase idéntica** (que hoy no es posible porque el recomp no llega al
+  diálogo).
+- **Todo commiteado y pusheado** (ver `git log`); artifacts al día
+  (`design.md` §10, `tasks.md` Fase 4.8, `decisions.md`).
