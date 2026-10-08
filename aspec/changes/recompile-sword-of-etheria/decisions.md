@@ -1557,3 +1557,22 @@ A6.** Ninguna acción de esta sección se ejecutó.
   4.9.3 fix del `+0x180`, 4.9.4 A/B del GS/VRAM, 4.9.5 limpieza).
 - **Seguimiento por artifacts**: cada hallazgo ⇒ entrada acá; cada avance ⇒ checkbox
   en `tasks.md`; diseño confirmado ⇒ `design.md` §11; cada cambio ⇒ commit + push.
+
+### 2026-10-08 — La consola renderiza en los bloques 2/3 de VRAM (FBP 0x100/0x180)
+- Leído `GS.bin` del savestate (VRAM 4 MB + 509 B): contenido por bloque de 1 MB:
+  ```
+  bloque 0 (0x000000):    55 px
+  bloque 1 (0x100000):     0 px
+  bloque 2 (0x200000): 64670 px  (64498 con RGB)   <- render real
+  bloque 3 (0x300000): 31773 px  (31733 con RGB)
+  ```
+- El **recomp** presenta desde **FBP=128 (0x80 → offset 0x100000 = bloque 1)**, que
+  en la consola está **vacío**, y sólo tiene el **clear alpha** (`rgbNZ=0`).
+- ⇒ **El framebuffer de render de la consola es `0x100`/`0x180`** (bloques 2/3),
+  distinto del que hoy usa el recomp (`0x80`). **Hipótesis fuerte**: el `dispfb`/
+  `fbp` del recomp está corrido (igual que el motor con el `+0x180`), así que el
+  *present* lee un buffer vacío mientras el render escribe en otro.
+- Generadas `/tmp/opencode/vram_consola_b{2,3}.png` (volcado lineal de la VRAM de
+  la consola) — **para inspección visual del render real**.
+- **Próximo**: volcar la **VRAM del recomp** (con `SWORD_MOTOR_PAD=1`) y comparar
+  bloque por bloque contra estos números ⇒ confirmar en qué FBP renderiza.
