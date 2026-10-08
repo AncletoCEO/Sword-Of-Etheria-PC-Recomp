@@ -1546,3 +1546,14 @@ A6.** Ninguna acción de esta sección se ejecutó.
 - **Próximo**: el render debe llegar por **otra ruta** (¿el XGKICK de VU1 que ya
   vimos? ¿otro DMA?). Revisar `[dma:start]`/canales con el pad activo y comparar
   con el esperado; o trazar el camino que **sí** produce los `[gs:kick]`.
+
+### 2026-10-08 — Plan aprobado: "llegar a imagen visible" (anclado a los artifacts)
+- **Evaluación honesta**: comprensión del bloqueo **~90%** (cadena del motor de DMA
+  trazada de punta a punta y gate localizado por eslabón); **imagen visible 0%**;
+  **5 atajos** activos que no son fixes (`SWORD_MOTOR_PAD`, `SWORD_HEAP_PAD`,
+  `SWORD_FORCE_3C0`, `SWORD_CB_PRODUCER`, `SWORD_RDRAM_DUMP`).
+- **Plan** (aprobado): `~/.commandcode/plans/llegar-al-menu-visual.md` ⇒ volcado a
+  **`tasks.md` → Fase 4.9** (4.9.1 acelerar ciclo, 4.9.2 ruta real del render,
+  4.9.3 fix del `+0x180`, 4.9.4 A/B del GS/VRAM, 4.9.5 limpieza).
+- **Seguimiento por artifacts**: cada hallazgo ⇒ entrada acá; cada avance ⇒ checkbox
+  en `tasks.md`; diseño confirmado ⇒ `design.md` §11; cada cambio ⇒ commit + push.

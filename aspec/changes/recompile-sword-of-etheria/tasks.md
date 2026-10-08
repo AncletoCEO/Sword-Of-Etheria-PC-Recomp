@@ -95,9 +95,42 @@
 - [x] Corrida de 10 min del build actual: **sin avance** (`gif=2`, `gsw=0`, `vif=6`, VRAM solo alpha) ⇒ el gate está **aguas arriba del render**.
 - [x] A/B con PCSX2 (2.8.2 + BIOS `ps2-0220e-20060210.bin`): capturada la referencia (diálogo de formato / título / menú principal) y verificado que el juego renderiza (microVU1 + shaders GL) desde ~10s.
 - [x] Descartado el pad como gate: el recomp nunca llama `scePadRead` (solo `scePadInit`+`scePadPortOpen`).
-- [ ] Diff de la secuencia de init (cargas CD, IRX, binds SIF/RPC) PCSX2 vs recomp para ubicar la divergencia.
-- [ ] Reparar carga física de `PADMAN` (hoy HLE; los `.IRX` están extraídos en `work/elf/IOP/`).
+- [x] Diff de la secuencia de init (cargas CD, IRX, binds SIF/RPC) PCSX2 vs recomp para ubicar la divergencia (2026-10-07: la divergencia fue **módulos IOP en HLE** y luego, aguas abajo, el **motor de DMA**).
+- [x] Reparar carga física de `PADMAN` (2026-10-08): **los 11 IRX cargan físicos por `cdrom0`** (SIO2MAN/PADMAN/SIO2D/DBCMAN/MC2_D/CDVDSTM/LIBSD/SDRDRV/LIBSMF2/SDSTR3/SD_CALL), cero HLE.
 - [ ] Hito: título + menú principal visibles en el recomp (cierra L60).
+
+## Fase 4.9 — Motor de DMA: alineación y camino al render (2026-10-08)
+
+> Plan aprobado: `~/.commandcode/plans/llegar-al-menu-visual.md`. Estado: el motor
+> de DMA está **trazado de punta a punta** y **se comporta igual que la consola**;
+> faltan (a) el eslabón **comandos→píxeles** y (b) el **fix real** del corrimiento
+> `+0x180` (hoy parcheado con `SWORD_MOTOR_PAD`). Imagen visible: **0%**.
+
+- [x] Trazar el motor de DMA: handler `0x6e4068`, ring `0xA96800` (`[tag][addr]` de 16 B), allocator `jalr *(0xA988C0)`, `set-base` `0x6e6d00`, init `0x51f450`.
+- [x] A/B por **savestates de PCSX2** (8 fases) + `game/rdram_diff.py`: la divergencia nace en el **init del motor** (slot 1 negro → slot 2 formato) con un corrimiento **`+0x150`/`+0x180`**.
+- [x] Con `SWORD_MOTOR_PAD` el **ring/head/tail y los buffers coinciden** con la consola y los comandos son **idénticos** (`00001101 00A96880`).
+- [x] Descartar el **kick GIF** (`0x6e47e4`) como gate: la consola también lo salta (`*(gp+0x3C0)=0`).
+
+### 4.9.1 — Acelerar el ciclo de iteración
+- [ ] Instrumentar/parchear **sólo `work/generated/FUN_006cba48_0x6cba48_p2.cpp`** (la copia viva; verificado con los tags `[GEN-B*]`) ⇒ ~2 min en vez de ~8 min por ciclo.
+- [ ] Consolidar atajos/instrumentación en **un `env` por experimento** + helper `fprintf` compartido.
+
+### 4.9.2 — Ruta real del render (eslabón faltante)
+- [ ] Instrumentar `vertexKick`/`submitGifPacket` (con `SWORD_MOTOR_PAD=1`) para ver **quién emite los `[gs:kick]`** (XGKICK/VU1 vs DMA directo).
+- [ ] Leer la **VRAM del savestate** (`GS.bin`) y comparar cuánto dibuja la consola en la fase del formato.
+- [ ] Hipótesis: el render va por **VU1/XGKICK** y el recomp casi no arranca el VU1 (3 MSCAL/60 s).
+
+### 4.9.3 — Fix real del corrimiento `+0x180` (reemplazar el parche)
+- [ ] A/B del bloque `gp-0x7A28..0x650`: **slot 1 (negro) vs slot 2 (formato) vs recomp**.
+- [ ] Breakpoint en PCSX2 (`0x6e6678` / `0x51f468`) **tras `Reset`** (así está puesto antes de que corra).
+- [ ] Sustituir `SWORD_MOTOR_PAD` por el fix (heap/allocator correcto).
+
+### 4.9.4 — A/B del GS (VRAM) si el render sigue sin aparecer
+- [ ] Volcar la VRAM del recomp y comparar con `GS.bin`: contar `rgbNZ` y verificar FBP/ventana.
+
+### 4.9.5 — Limpieza (cierre del hito)
+- [ ] Revertir los **5 triages/atajos** (`SWORD_MOTOR_PAD`, `SWORD_HEAP_PAD`, `SWORD_FORCE_3C0`, `SWORD_CB_PRODUCER`, `SWORD_RDRAM_DUMP`) y dejar sólo lo que sea fix real.
+- [ ] `design.md` **§11**: arquitectura del camino del render confirmada.
 
 ## Herramientas de debug (2026-10-05)
 
