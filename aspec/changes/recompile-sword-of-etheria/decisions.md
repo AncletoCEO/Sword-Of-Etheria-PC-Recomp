@@ -1464,3 +1464,17 @@ A6.** Ninguna acción de esta sección se ejecutó.
   `~0x180` más abajo (`inicio` = `0xA96000` consola vs `0xA95E80` recomp) — el
   `SetupHeap`/`sbrk` o el primer `alloc`. Con eso, el motor apuntaría al ring real
   y debería aparecer imagen.
+
+### 2026-10-08 — Atajo `SWORD_HEAP_PAD` sin efecto (el buffer no viene del kernel)
+- Se agregó `SWORD_HEAP_PAD=N` en `SetupHeap` (syscall 0x3D) para desplazar el
+  heap base y compensar el `0x180`. Corrida con `SWORD_HEAP_PAD=0x180`:
+  **sin cambios** — `gp+0x5F8` sigue en `0xA96680`.
+- ⇒ **el buffer del motor no sale del heap del kernel** (`SetupHeap`); lo asigna
+  su propio allocator (`0x51f450` + el `jalr`), así que el pad no lo toca.
+- **Estado del fix**: el motor está **vivo y correcto** (genera comandos
+  idénticos), sólo desplazado `0x180`. El desplazamiento nace en el **allocator
+  del juego** (`jalr *(0xA988C0)` devuelve `0xA95E50` vs `0xA95FA0`).
+- **Próximo concreto**: ver **cómo `0x51f450` obtiene su buffer** (¿`sbrk`?
+  ¿`malloc` interno?) y por qué sale `0x180` más abajo — o compensar en el punto
+  donde el motor guarda su base (`0x6e6684`/`set-base`), que sí está localizado.
+- **Atajo quedó detrás de env** (`SWORD_HEAP_PAD`, OFF por defecto ⇒ inocuo).
