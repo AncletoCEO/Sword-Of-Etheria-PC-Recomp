@@ -1364,3 +1364,30 @@ A6.** Ninguna acción de esta sección se ejecutó.
   (recomp) ⇒ el **heap del juego arranca ~`0x180` más abajo** en el recomp.
 - **Próximo**: instrumentar `set-base`/los `allocs` en el recomp (cargar el
   dump/A-B ya montado) para ver **dónde** se pierden los `0x150`.
+
+### 2026-10-08 — El `jalr` es el allocator: devuelve `0x150` menos (con basura en el puntero)
+- Instrumenté en el generado `0x6e6d00` (set-base) y `0x6e6684` (asignación de la
+  base). Secuencia real en el recomp:
+  ```
+  [GEN] 6e6d00-setbase a2=00000000            ; set-base(0)  => BASE = 0
+  [GEN] 6e6684-base=v0=00a95e50 gp=00a28070   ; BASE = 0xA95E50  (v0 del jalr)
+  ```
+  ⇒ **el `jalr *(0xA988C0)` SÍ se ejecuta** en el recomp y **devuelve la base**:
+  `0xA95E50` (recomp) vs `0xA95FA0` (consola) ⇒ **`+0x150`**.
+- **El init del heap** (`0x51f450`) se llama con **`a0=0`** (`0x512ab0..0x512ac8`)
+  ⇒ sólo resetea (`set-base(0x100000,0x400,0)`).
+- **Estado del puntero del allocator** (`0xA988C0`):
+  | | recomp | consola slot1 | consola slot2 |
+  |---|---|---|---|
+  | `0xA988C0` | **`0x43400000`** | `0` | **`0x1000000F`** |
+  | `0xA988C4` | `0x432E0000` | `0` | `0` |
+  | `0xA988B8/BC` | **`0x55555555`** | `0` | `0` |
+  ⇒ en el recomp esa zona tiene **basura** (`0x55555555`/`0x43400000`), no los
+  punteros del juego. (`0x55555555` **no** lo pone el runtime: grep vacío.)
+- **Pista del mecanismo**: en el savestate hay **muchas** entradas con valores
+  `0x10000000..0x1000004C` (`0xA938xx`, `0xA8D1xx`, …) ⇒ el juego usa una
+  **tabla de "handles" en la región `0x10000000+`** (que en el EE es MMIO) como
+  punteros a funciones/servicios. Es el mecanismo que **no estamos replicando**.
+- **Conclusión**: el gate es la **instalación/uso de esa tabla `0x10000000+`**
+  (los punteros de alloc/free del motor salen de ahí y en el recomp están sin
+  inicializar/basura) ⇒ la asignación devuelve `0x150` menos ⇒ sin frames.
