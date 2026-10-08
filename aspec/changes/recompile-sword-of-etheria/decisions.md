@@ -1067,3 +1067,21 @@ A6.** Ninguna acción de esta sección se ejecutó.
   siguen los `fprintf` de instrumentación (`GEN-*`, `[dmairq]`, `[motorinit]`,
   `[dmasync]`, `[prod]`, `[wp*]`, `[f5cf-force]`) como triages a limpiar al
   cerrar el hito.
+
+### 2026-10-08 — Todo el motor de DMA vive DENTRO del handler (sin entradas externas)
+- **Escaneo estático** de `0x6e4348` (productor), `0x6e4564` (2º escritor de
+  `head`), `0x6e44e4/44fc/4644` (escritores de `f5cf`): **cero referencias** en
+  todo el ELF — ni `jal`/`j`, ni punteros literales, ni `lui 0x6e + addiu`.
+- ⇒ Son **código interior** del handler de DMAC (`0x6e4068..0x6e4840`). **Todo
+  el "motor de DMA" está auto-contenido ahí**: productor, escritores de
+  `head`/`tail`/`f5cf`, consumidor.
+- **Consecuencia**: como el handler **sale si `head == tail`** (`0x6e40f0`) y
+  **nadie encola desde afuera** (los únicos escritores de `head` son internos),
+  el **círculo nunca se rompe**: `head==tail` ⇒ sale ⇒ no produce ⇒ `head==tail`…
+- ⇒ En una PS2 real, algo debe dejar `head != tail` **antes** del primer
+  dispatch (el setup `0x6efd28` limpia `0x3C0..0x3CC` y llama al reset, pero **no
+  escribe `head`**). **Ahí está la pregunta**: qué estado inicial de la cola
+  espera el juego y por qué el nuestro arranca en `head==tail`.
+- **Próximo**: instrumentar el **setup `0x6efd28`** (en el generado, copia
+  `FUN_006cba48_p3`), sobre todo después del `jal 0x6e6640` (`0x6f0958+`), y ver
+  qué deja en la cola / si debería llamar al productor.
