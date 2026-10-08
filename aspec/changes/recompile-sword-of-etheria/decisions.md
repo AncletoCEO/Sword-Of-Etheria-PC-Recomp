@@ -996,3 +996,27 @@ A6.** Ninguna acción de esta sección se ejecutó.
   (`fprintf`), que es la vía que sí funciona en esa zona (el equipo lo hacía así).
 - **Próximo**: instrumentar en el **generado** (`0x6f0950` → ¿llega al `jal`? y
   `0x6e6640` → ¿corre el reset?), en las **4 copias** si hace falta.
+
+### 2026-10-08 — Instrumentado el generado: **el init del motor SÍ corre**; y la copia que ejecuta es `FUN_006cba48`
+- **Instrumenté las 4 copias** del generado (`label_6f0950` en los `*_p42/p3`,
+  `label_6e6640` en los `*_p41/p2`) con `fprintf` + tag por archivo
+  (`A41/B2/C2/D2/A42/B3/C3/D3`).
+- **Resultado**: exactamente **2 líneas**:
+  ```
+  [GEN-B3] 6f0950-jal  n=1        (copia FUN_006cba48_p3)
+  [GEN-B2] 6e6640-init n=1        (copia FUN_006cba48_p2)
+  ```
+- **Conclusiones**:
+  1. **El init del motor SÍ se ejecuta** (1 vez): el `jal 0x6e6640` **llega** y la
+     función corre. La conclusión anterior ("nunca corre") era **falsa** (era
+     consecuencia del override que no aplicaba).
+  2. ⚠️ **La copia EJECUTADA es `FUN_006cba48` (tag B)**, NO `FUN_004eb8d0`
+     (tag A). ⇒ el runtime **registra una copia y ejecuta otra**: por eso los
+     `replaceFunction` en ese rango **no surten efecto** (registran bajo A pero
+     corre B). **Regla nueva: instrumentar/parchear `FUN_006cba48`** (y verificar
+     por tag cuál corre) — no `FUN_004eb8d0`.
+  3. El reset corre **1 sola vez** y aun así `f5cf=1`/`cb=0` en runtime ⇒ o sale
+     antes de `0x6e690c` (early return), o algo lo vuelve a poner en 1 después.
+- **Próximo**: instrumentar dentro de **`FUN_006cba48`** el tramo del reset
+  (`0x6e68e8..0x6e6914`: `sb 0x630`, `sw 0x5dc/5e0/5e4/5e8/5ec`, `sb 0x5cf`,
+  `sb 0x640`) para ver **dónde sale** y con qué deja `f5cf`/`cb`.
