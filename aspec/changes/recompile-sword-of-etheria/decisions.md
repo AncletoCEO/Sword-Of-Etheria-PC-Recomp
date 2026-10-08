@@ -1588,3 +1588,21 @@ A6.** Ninguna acción de esta sección se ejecutó.
   renderizar** (VU1/XGKICK), no el `dispfb`.
 - **Próximo**: trazar el **arranque del renderer** (los MSCAL/XGKICK) y compararlo
   con la consola (que renderiza desde ~10 s) — ¿qué condición debería dispararlos?
+
+### 2026-10-08 — El VU1/XGKICK SÍ corre; el render sale a FBP 0x80 y con color 0
+- Con `SWORD_MOTOR_PAD=1`, el VU1 **funciona y emite GIF**:
+  ```
+  [vu1:mscal] startPc=0x0 endPc=0x168 stopD=0 stopT=0  eePc=0x6e4468 eeRa=0x6e4ebc
+  [gs:gif] idx=4 size=2576 nloop=3 nreg=3 ctx0fbp=128 ctx1fbp=128
+  ```
+  ⇒ el replay al problema **no es el VIF1/VU1/XGKICK** (están vivos).
+- **Dos defectos concretos**:
+  1. **`ctx0fbp=128`** ⇒ el juego dibuja a **FBP `0x80`**, mientras la **consola
+     renderiza en `0x100`/`0x180`** ⇒ **el FBP está corrido** (mismo patrón que el
+     `+0x180` del motor).
+  2. La VRAM queda **sin RGB** ⇒ **el color de los vértices es 0** (el `RGBAQ=(0,0,0,0)`
+     que ya habíamos visto) ⇒ aunque se rasteriza, no pinta nada.
+- **En ELF**: no existe ningún `MSCAL` construido (`lui 0x1400`/literales, 0 hits) ⇒
+  el microcódigo VU1 se arranca por otro camino (¿los paquetes del ring?).
+- **Próximo**: (a) por qué el color es 0 (¿microcódigo VU1 incompleto / datos no
+  cargados?), (b) corregir el FBP `0x80`→`0x100` (el *mismo* corrimiento a matar).
