@@ -1530,3 +1530,19 @@ A6.** Ninguna acción de esta sección se ejecutó.
 - **Próximo**: instrumentar el tramo `0x6e4494..0x6e47c0` del handler para ver
   **dónde** se desvía antes del kick GIF (ese es el último eslabón al primer
   frame con contenido).
+
+### 2026-10-08 — Corrección: el kick GIF NO es el camino (recomp y consola iguales)
+- Traza del handler: el flujo **sí pasa los 3 checks** (`PASS-checks` ✓) y **llega
+  al tramo `0x6e47c0`** (`tramo-GIF` ✓) — pero en `0x6e47d0` hace
+  `beq $v1,$0 -> 0x6e4814` con **`v1 = 0`** ⇒ salta el kick.
+- **El valor**: `v0 = *(gp+0x64C)`, y `v1 = *(v0+0x3C0)`. En la **consola**, en
+  **todas** las fases (2..8): `*(gp+0x64C) = 0x00A28070` (gp) y
+  `*(gp+0x3C0) = 0` ⇒ **la consola también salta el kick GIF**.
+- ⇒ **el recomp y la consola se comportan IGUAL** en ese tramo: **el kick GIF NO
+  es el camino del render**. Hipótesis anterior **descartada**.
+- **Nota**: mi atajo `SWORD_FORCE_3C0` apuntaba a `gp+0x3C0` (y además el recomp
+  tenía `*(gp+0x64C) = 0xA8D0B4`, no `gp`) ⇒ quedó mal dirigido (y de todos modos
+  la consola no lo usa).
+- **Próximo**: el render debe llegar por **otra ruta** (¿el XGKICK de VU1 que ya
+  vimos? ¿otro DMA?). Revisar `[dma:start]`/canales con el pad activo y comparar
+  con el esperado; o trazar el camino que **sí** produce los `[gs:kick]`.
