@@ -860,3 +860,21 @@ A6.** Ninguna acción de esta sección se ejecutó.
   `tools/PS2Recomp → /home/lubonch/repos/_external/PS2Recomp`,
   `ghidra-mcp → /home/lubonch/repos/_external/ghidra-mcp`; sus `.git` quedan
   como `.git-off`. VS Code ya no los ve como repos.
+
+### 2026-10-08 — Watchpoints: nadie escribe la cola vía `Store32/8` (fast-write)
+- **Búsqueda de callers** del instalador de `cb` (`0x6e6934`) y del reset
+  (`0x6e68e0`): **0 callers** (ni `jal`/`j` ni punteros literales en el ELF) ⇒
+  ni reachable estáticamente.
+- **Watchpoints** en `PS2Runtime::Store8/Store32` sobre `gp+0x5CF`, `gp+0x630`,
+  `gp+0x638`, `gp+0x63C` y `gp-0x7A30` (comparando **relativo al gp del ctx** y
+  también **absoluto** con `gp=0xA28070`): **0 hits en 60s**.
+- **Pero** `[dmairq]` confirma que `head`/`tail` **cambian**
+  (`0xa96680/0xa96690 → 0xb15a80/0xb15a90`) con `gp=0xa28070`.
+- **Conclusión**: el juego escribe esos campos por un camino que **no pasa por
+  `Store32/Store8`** ⇒ el generado usa **`FAST_WRITE*`** (escritura directa a
+  RDRAM) o `Store128`. Por eso los watchpoints del runtime no sirven para estos
+  campos.
+- **Próximo**: para instrumentar el productor hay que usar
+  **`runtime.replaceFunction(0x6e4348u, …)`** (funciona, el equipo ya lo hizo
+  como `triageProd`) o editar el generado en las **4 copias**; o probar
+  watchpoints en `Store128/Store64`.
