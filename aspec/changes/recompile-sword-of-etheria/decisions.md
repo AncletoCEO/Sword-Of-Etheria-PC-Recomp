@@ -897,3 +897,21 @@ A6.** Ninguna acción de esta sección se ejecutó.
 - **Próximo**: `replaceFunction(0x6e68e0, log)` y `replaceFunction(0x6e6934, log)`
   para confirmar si el init corre en runtime (independiente de callers
   estáticos), y si no, rastrear su caller por otras vías (jalr / tablas).
+
+### 2026-10-08 — El init del motor de DMA **nunca corre** (confirmado en runtime)
+- **Hookeado** `0x6e68e0` (reset motor) y `0x6e6934` (instala `cb`) con
+  `replaceFunction` + `g_orig*` (loguea `ra`/`a0` y llama al original).
+- **Resultado**: `[motorinit] lookup 0x6e68e0=OK 0x6e6934=OK` (ambas
+  **registradas** en la tabla de funciones) pero **cero disparos** ⇒ ni el reset
+  ni el instalador se ejecutan.
+- **Salvedad**: son direcciones **interiores** a sus funciones; si el runtime
+  consultara overrides sólo al entrar a la función (no en cada instrucción), el
+  hook podría no dispararse aunque la función corriera. A verificar hookeando el
+  **próemio real** (encontrar el inicio de esas funciones).
+- **Estado**: el cuadro queda coherente y cerrado a nivel motor — **el juego no
+  inicializa su motor de DMA/render** (`cb=0`, `f5cf=1` de fábrica), el handler
+  de DMAC sale temprano, el productor nunca corre, la cola nunca se llena, no
+  hay frames (32 kicks/60s).
+- **Próximo**: o bien encontrar el **inicio real** de `0x6e68e0`/`0x6e6934` y
+  hookearlo, o subir un nivel: buscar **quién debería llamar al init del motor**
+  (jalr/tabla) — es el último eslabón antes del primer frame.
