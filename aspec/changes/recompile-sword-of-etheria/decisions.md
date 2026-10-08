@@ -1576,3 +1576,15 @@ A6.** Ninguna acción de esta sección se ejecutó.
   la consola) — **para inspección visual del render real**.
 - **Próximo**: volcar la **VRAM del recomp** (con `SWORD_MOTOR_PAD=1`) y comparar
   bloque por bloque contra estos números ⇒ confirmar en qué FBP renderiza.
+
+### 2026-10-08 — 4.9.4: el recomp no tiene NINGÚN píxel con RGB en VRAM
+- Instrumentado un conteo por bloque de VRAM en el recomp (`[gsblk]`, en el drain
+  de DMAC): **`b0=0 b1=0 b2=0 b3=0`** ⇒ **cero píxeles con RGB en toda la VRAM**.
+- Referencia (savestate, consola): `b2=64670`, `b3=31773` (**96k px con RGB**).
+- ⇒ El recomp **no rasteriza contenido en ninguna parte** (sólo el clear alpha, como
+  ya sabíamos). Y el VU1 hace **3 MSCAL/60 s** ⇒ **el juego no arranca su renderer**.
+- **Esto reencuadra 4.9.2**: no es (sólo) que el present lea el FBP equivocado — es
+  que **no hay nada dibujado**. La ruta a atacar es **por qué el juego no llega a
+  renderizar** (VU1/XGKICK), no el `dispfb`.
+- **Próximo**: trazar el **arranque del renderer** (los MSCAL/XGKICK) y compararlo
+  con la consola (que renderiza desde ~10 s) — ¿qué condición debería dispararlos?
