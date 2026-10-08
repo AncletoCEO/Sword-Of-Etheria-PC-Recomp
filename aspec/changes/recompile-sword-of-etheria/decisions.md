@@ -977,3 +977,22 @@ A6.** Ninguna acción de esta sección se ejecutó.
 - **Próximo**: hookear/loguear `0x6f0940`/`0x6f0950` (justo antes del `jal`) para
   ver si el flujo llega ahí, y verificar que el override de `0x6e6640` se aplique
   (p.ej. hookear una dirección vecina conocida como control).
+
+### 2026-10-08 — ⚠️ CORRECCIÓN METODOLÓGICA: los `replaceFunction` no disparan en esa zona
+- **Prólogo real**: las 4 call-sites de `0x4d1a60` (`0x6f01e8`, `0x6f07d8`,
+  `0x6f0928`, `0x6f0950`) están **todas dentro de una misma función** cuyo prólogo
+  es **`0x6efd28`** (`addiu sp,sp,-160`).
+- **Hookeado `0x6efd28`** (`lookup=OK`): **cero disparos**. **PERO** el código de
+  `0x6f0920` (dentro de `0x6efd28`) **sí corre** — probado por el `ra=0x6f0928`
+  con que `0x4d1a60` fue llamada.
+- ⇒ **Los overrides de `replaceFunction` NO se aplican en las direcciones de esa
+  zona**: el código generado de los "monsters" usa **`goto label_X` internos que
+  bypassean el check de overrides** (limitación ya anotada por el equipo:
+  "los `goto` internos bypassean hooks"). `lookupFunction` devuelve algo
+  (`lookup=OK`) pero el override **nunca se consulta** en esas direcciones.
+- ⚠️ **Consecuencia**: quedan **inválidas** las conclusiones basadas en
+  "el hook de `0x6e6640`/`0x6e6934` no dispara ⇒ no corre". NO sabemos si el init
+  del motor corre o no — hay que instrumentarlo **editando el generado**
+  (`fprintf`), que es la vía que sí funciona en esa zona (el equipo lo hacía así).
+- **Próximo**: instrumentar en el **generado** (`0x6f0950` → ¿llega al `jal`? y
+  `0x6e6640` → ¿corre el reset?), en las **4 copias** si hace falta.
