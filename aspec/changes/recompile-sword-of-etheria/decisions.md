@@ -962,3 +962,18 @@ A6.** Ninguna acción de esta sección se ejecutó.
   handler de DMAC sale, el productor nunca corre, **no hay frames**. **Ese es el
   gate real**, y es donde hay que mirar: por qué nuestro runtime no satisface esa
   espera (`0x12001000` bit 1 / CHCR de VIF1/GIF).
+
+### 2026-10-08 — CORRECCIÓN: el spin `0x6f0920` **sí sale** (no es el gate)
+- **Hookeado `0x4d1a60`** (`lookup=OK`; log `[dmasync] a0/ret/ra`).
+- **Resultado (45s)**: **solo 3 llamadas**, todas con `a0=1` y **`ret=0x0 (ZERO)`**
+  ⇒ `0x4d1a60` devuelve 0 ⇒ el spin `0x6f0920` (`bne $v0,0 → loop`) **NO repite**:
+  **sale**. `ra` = `0x6f01e8`, `0x6f07d8`, `0x6f0928` (3 call sites distintos).
+- ⇒ **Mi conclusión anterior era incorrecta**: el juego **no** está atascado en
+  ese sync (si lo estuviera, habría miles de llamadas).
+- **Sigue en pie**: el hook de `0x6e6640` (init del motor) **no dispara** — pero
+  ahora no se explica por el spin. Hipótesis: (a) `replaceFunction(0x6e6640)` no
+  surte efecto en esa dirección (aunque `lookup=OK`), o (b) el bloque
+  `0x6f0930..0x6f0950` (tras el spin) no se ejecuta / salta antes.
+- **Próximo**: hookear/loguear `0x6f0940`/`0x6f0950` (justo antes del `jal`) para
+  ver si el flujo llega ahí, y verificar que el override de `0x6e6640` se aplique
+  (p.ej. hookear una dirección vecina conocida como control).
