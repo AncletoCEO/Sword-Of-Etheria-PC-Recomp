@@ -1341,3 +1341,26 @@ A6.** Ninguna acción de esta sección se ejecutó.
 - **Próximo**: rastrear el **allocator del juego** (¿una cabecera/bloque de
   inicialización de ~0x150 que no se crea?) — o afinar el A/B con un dump en una
   fase más comparable.
+
+### 2026-10-08 — Allocator del motor identificado (init / set-base / free)
+- Escritores de la BASE (`gp-0x7A28`): `0x6e6684` (reset, camino del `jalr`),
+  **`0x6e6ce8`** y **`0x6e6d2c`**. Desensamblados:
+  - **`0x6e6d00` = "set-base"**: `sw $a2,-0x7A28($gp)` (guarda la base que le
+    pasan, con alineación a 0x80 vía el bucle `andi $v0,$a2,0x7F`).
+  - **`0x6e6cb8` = "free del motor"**: `jalr *(0xA988C4)` con `a0=BASE` y luego
+    `BASE=0`, `cb=0`, `inicio=0`.
+- **Callers**: `set-base` ← **`0x51f468`**; `free` ← `0x6f0bd4`; `reset` ←
+  `0x6f0950`.
+- **`0x51f450` = init del heap del juego** (región `0x51xxxx`):
+  ```
+  0x51f454  addiu a1,$0,0x400        ; align 0x400
+  0x51f45c  daddu a2,$0,$0           ; base 0
+  0x51f468  jal   0x6e6d00           ; set-base(0x100000, 0x400, 0)
+  0x51f46c  lui   a0,0x0010          ; tamaño 1 MB
+  0x51f480  sw    $0,-0x78FC($gp)
+  0x51f488  sw    v1,0x14(a1)        ; tabla de punteros en 0xA42530
+  ```
+- **Dato del A/B**: `inicio` (`gp-0x7A34`) = `0xA96000` (consola) vs `0xA95E80`
+  (recomp) ⇒ el **heap del juego arranca ~`0x180` más abajo** en el recomp.
+- **Próximo**: instrumentar `set-base`/los `allocs` en el recomp (cargar el
+  dump/A-B ya montado) para ver **dónde** se pierden los `0x150`.
