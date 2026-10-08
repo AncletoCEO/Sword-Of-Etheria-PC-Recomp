@@ -1478,3 +1478,24 @@ A6.** Ninguna acción de esta sección se ejecutó.
   ¿`malloc` interno?) y por qué sale `0x180` más abajo — o compensar en el punto
   donde el motor guarda su base (`0x6e6684`/`set-base`), que sí está localizado.
 - **Atajo quedó detrás de env** (`SWORD_HEAP_PAD`, OFF por defecto ⇒ inocuo).
+
+### 2026-10-08 — `SWORD_MOTOR_PAD` alinea el ring con la consola (pero sin imagen aún)
+- Atajo en el generado: en `0x6e66dc` (el `sw $s0, inicio`) sumar `0x180` a `s0`
+  cuando `SWORD_MOTOR_PAD=1`. (El de `0x6e6684`, la base, quedó como
+  `SWORD_MOTOR_PAD_V0` porque compensar **ambos** daba `+0x300`.)
+- **Resultado** — el motor ahora apunta **al ring de la consola**:
+  ```
+  recomp (pad): ring=0xA96800 head=0xA96800 tail=0xA96810
+  consola slot2: ring=0xA96800 head=0xB15C00 tail=0xB15C30
+  ```
+  ⇒ ring/head/tail **coinciden en el rango correcto** (antes `0xA96680`).
+- **PERO** `gif=2`, `gsw=0`, `vramNonZero` sin cambio (0/262144) ⇒ **sin imagen
+  todavía**: alinear el offset **no era suficiente**. El motor apunta al ring real
+  pero el render sigue sin emitirse.
+- **Conclusión**: el corrimiento `0x180` **era real y se corrige con el pad**, pero
+  hay **al menos un problema adicional** (el motor en el recomp, aun con el ring
+  correcto, no emite GIF).
+- **Nota**: el pad vive en el **generado** (se pierde al regenerar) y está detrás
+  de env (`SWORD_MOTOR_PAD`), anotado como triage.
+- **Próximo**: con el ring ya alineado, comparar `[dmairq]`/los comandos del ring
+  contra la consola para ver **qué falta** en la cadena hasta el GIF.
