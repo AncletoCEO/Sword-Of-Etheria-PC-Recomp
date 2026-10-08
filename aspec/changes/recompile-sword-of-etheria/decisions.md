@@ -1186,3 +1186,28 @@ A6.** Ninguna acción de esta sección se ejecutó.
   funcional; formato de la cola; `cb`/`f5cf` descartados por A/B), aunque **sin
   imagen con contenido todavía**. Próximo paso bien acotado: hallar al
   **escritor del ring** y por qué no corre en el recomp.
+
+### 2026-10-08 — **Decisivo**: el ring está VACÍO en el recomp; escritor localizado
+- **Volcado del ring en el recomp** (`[ring] 0xa96800`): **48 bytes en 0x00** ⇒
+  **el juego NUNCA escribe los comandos del ring**. En la consola está lleno.
+- **Corrección** de la medición previa de `head`/`tail`: los `[dmairq]` muestran
+  `head=0xA96680 tail=0xA96690 **WORK**` y `head=0xB15A80 … WORK` ⇒ son
+  **punteros válidos y a veces WORK** (mi lectura anterior de `0x80/0x90` era
+  mala). El handler **no** sale siempre; el problema es que **el ring está vacío**.
+- **Escritor del motor localizado**: buscando la constante del tag (`addiu
+  $rt,$0,0x1101`) apareció en **`0x6e58fc`**, **`0x6e5cf0`** y `0x6dd49c`.
+  Desensamblado `0x6e5cec..0x6e5d20` — **arma el comando del motor**:
+  ```
+  0x6e5cec  lw  $v0,0x5DC($gp)
+  0x6e5cf0  addiu $v1,$0,0x1101        ; tag
+  0x6e5cf8  sw  $v0,0x5C0($gp)
+  0x6e5cfc  sw  $v1,0x62C($gp)         ; tag 0x1101
+  0x6e5d00  sw  $a0,0x620($gp)
+  0x6e5d14  ori $v0,$v0,0x1101         ; 0x80001101 (tag con bit 31)
+  0x6e5d1c  sw  $v0,0x62C($gp)
+  ```
+  Es de la **misma zona del handler** (`0x6e5xxx`) ⇒ el handler debe **procesar**
+  para llegar acá y encolar.
+- **Próximo (decisivo)**: instrumentar **`0x6e5cf0`** en el generado (copia
+  `FUN_006cba48`) para ver si corre en el recomp; si no, ver qué rama del handler
+  lo está evitando.
