@@ -1153,3 +1153,22 @@ A6.** Ninguna acción de esta sección se ejecutó.
 - **Próximo**: encontrar **quién inicializa `head`/`tail` con el puntero del ring
   (`0xA96800`)** y por qué en el recomp no ocurre (o queda sobrescrito). Candidato
   claro y acotado.
+
+### 2026-10-08 — Formato del ring (leído del savestate): comandos de 16 B
+- **Contenido del ring `0xA96800` (consola)** — entradas de **16 B** = dos pares
+  `[u32 tag][u32 addr]`:
+  ```
+  0xa96800: 00001101 00a96880 | 00001042 00b96898
+  0xa96810: 00001042 00b97738 | 00001042 00b96d78
+  ...
+  ```
+  Tags vistos: **`0x1101`** (1er comando, apunta a `0xA96880` = ring+0x80, o sea una
+  cabecera/estructura) y **`0x1042`** (mayoría; apunta a buffers `0xB9xxxx`).
+- **Ocupación**: slot1 (diálogo) `head→tail` = 3 entradas; **slot2 (título) =
+  1934 entradas** ⇒ la cola está **llena** en la consola.
+- **Coincidencia notable**: **1934 entradas ≈ los `ch9 (VIF1) = 1933` DMA**
+  medidos en el recomp ⇒ fuerte indicio de que *ese* es el mecanismo de render
+  (la cola alimenta los DMA de VIF1) y que en el recomp el vínculo
+  cola→DMA no está cerrándose por los `head`/`tail` inválidos.
+- **Próximo**: ver **quién escribe los comandos** en el ring (`0xA96800+`) y quién
+  fija `head`/`tail`; comparar con el recomp (donde la cola nunca se llena).
