@@ -1313,3 +1313,31 @@ A6.** Ninguna acción de esta sección se ejecutó.
   `0x6e6678` y viendo quién/para qué se llama (y con qué devuelve); (b) buscar
   `0x1000000F` / la convención `0x10000000+` en el binario y en el código del
   recomp; (c) revisar si el runtime define trampolines ahí.
+
+### 2026-10-08 — **Diff de RDRAM: el heap está corrido `+0x150` (pista fuerte)**
+- El debugger de PCSX2 se queda en el entry (`0x4C0008`) ⇒ se descartó; se usó
+  **A/B por RDRAM**.
+- Herramienta nueva: **`game/rdram_diff.py`** (diff entre el dump del recomp y
+  `eeMemory.bin` del savestate). El recomp volca 512 KB desde `0xA20000` con
+  `SWORD_RDRAM_DUMP`.
+- **Resultado**: `8.0 %` de words distintos (10479/131072), concentrados en el
+  **heap** (`0xa94000..0xa9f000`). Y el patrón es **sistemático**:
+  ```
+  deltas (consola − recomp) en punteros del heap: { 336 (0x150): 9,
+                                                     384 (0x180): 5,
+                                                     416 (0x1A0): 1, ... }
+  ```
+  ⇒ **todos los punteros del heap están ~`0x150` más bajos en el recomp**.
+- Otras diferencias relevantes: campos que en el recomp son **0** y en la consola
+  son punteros (`0xA20248`: `0` vs `0x00E20DD0`; `0xA20A04`: `0` vs `0x00B83000`)
+  ⇒ **asignaciones que en el recomp no ocurren**; y contadores distintos
+  (`0xA206F4`: `2` vs `0x1DB`; `0xA20730`: `8` vs `0x28`).
+- **Salvedad metodológica**: el dump del recomp es de una fase temprana
+  (`primer head!=0`) y el savestate del **diálogo** ⇒ parte del ruido es de fase.
+  Pero el corrimiento `+0x150` de los punteros es del **estado del allocator**.
+- **Conclusión**: el allocator del juego (CRT/libc propio) **reparte ~0x150
+  menos** en el recomp ⇒ el motor apunta a buffers corridos ⇒ el ring real queda
+  vacío. Ahí está la causa raíz.
+- **Próximo**: rastrear el **allocator del juego** (¿una cabecera/bloque de
+  inicialización de ~0x150 que no se crea?) — o afinar el A/B con un dump en una
+  fase más comparable.
