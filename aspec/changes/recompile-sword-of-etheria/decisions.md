@@ -799,3 +799,23 @@ A6.** Ninguna acción de esta sección se ejecutó.
 - **Próximo**: entender qué llena `gp+0x638/0x63C` (el productor de la cola de
   DMA) y por qué quedan iguales; y qué es `gp+0x5CF` (flag que también frena).
   Ese es el camino directo al primer frame.
+
+### 2026-10-08 — El ciclo productor/consumidor del DMA del motor
+- **Escaneo del ELF** (`gp`=r28, escrituras/lecturas de `0x638/0x63C/0x630/0x5CF`):
+  - **Productor** `0x6e4348` (`sw $v0,0x638($gp)`), con `0x6e433c: sw 0x145 →
+    (VIF1 CHCR)` ⇒ **el kick del VIF1 lo hace el productor** y **avanza
+    `head += 8`** (`0x6e4340/0x6e4348`) + `gp+0x630 += 2`.
+  - **Consumidor/spin** `0x6e4d98`: `lw 0x638` (head) vs `lw 0x63C` (tail);
+    `bne` → procesar; si iguales llama al callback **`*(gp-0x7A30)` (cb)** y
+    **gira** (`bne $s0,0 → 0x6e4d98`). El log muestra **`cb=0x0`** ⇒ gira sin
+    llamar nada (macro-spin).
+  - **Tail** se actualiza en `0x6e4e04: sw $a0,0x63C($gp)`.
+  - `0x630` se incrementa en el productor y **decrementa** en el handler
+    (`0x6e40d8`) ⇒ es el contador de "DMA en vuelo".
+- **Lectura del sistema**: `gp+0x638/0x63C` = **head/tail de la cola de
+  comandos DMA/render del motor** (no audio). El handler de DMAC la mira
+  (`beq head,tail → salir`) y el spin la espera. `gp+0x5CF` es otro flag que
+  también frena el handler.
+- **Próximo**: con esto claro, instrumentar **head/tail/cb/630/5CF en el
+  momento del handler de DMA** (no en el harness viejo) para ver si el
+  productor deja `head != tail` y el handler lo ve; y por qué `cb == 0`.
