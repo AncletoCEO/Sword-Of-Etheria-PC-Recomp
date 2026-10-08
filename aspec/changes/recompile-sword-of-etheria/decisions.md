@@ -1107,3 +1107,23 @@ A6.** Ninguna acción de esta sección se ejecutó.
   arranque (carga) que en nuestro recomp no deja el mismo estado, o un `head`
   inicial distinto. `head` pasa a `0x80/0x90` recién **después** del setup
   (escritor `0x6e4564`, interno del handler).
+
+### 2026-10-08 — Atajo `cb = productor`: el spin no llega a invocarlo
+- **Hipótesis**: el spin (`0x6e4d98`) llama a `cb` (`gp-0x7A30`) cuando
+  `head==tail` para **producir**; `cb=0` ⇒ nunca llena la cola. Experimento:
+  instalar `cb = 0x6e4348` (el productor) en runtime (`SWORD_CB_PRODUCER=1`).
+- **Resultado**: el `cb` **se instala** (`[cb-install] cb = 0x6e4348`) pero
+  `prod` sigue en **0** ⇒ **el spin no llega a invocar `cb`** (o no corre tras
+  instalarlo). Sin cambio: `gif=2`, `vramNonZero=0`.
+- **Estado**: el atajo quedó **detrás de env** (`SWORD_CB_PRODUCER`, OFF por
+  defecto ⇒ inocuo) como experimento revertible; anotado como triage.
+- **Balance del día**: pese a ~40 ciclos build+run **no se alcanzó imagen con
+  contenido**. El cuadro es coherente y está bien acotado (todo el motor de DMA
+  vive en el handler de DMAC; nadie llena la cola; el handler sale por
+  `head==tail`), pero **la causa raíz de por qué la cola arranca vacía en el
+  recomp y no en la consola sigue sin determinarse**.
+- **Siguientes candidatos**: (a) A/B fino con PCSX2 del estado de la cola en el
+  primer frame (requiere ver RDRAM en PCSX2 — p.ej. via debugger/savestate);
+  (b) revisar si el runtime **genera las IRQ de DMAC** con la misma cadencia que
+  la consola (el handler procesa según IRQ); (c) revisar el arranque `0x4c008c`
+  → por si un paso de init del DMAC (que la consola hace) se está salteando.
