@@ -1044,3 +1044,26 @@ A6.** Ninguna acción de esta sección se ejecutó.
   (`FUN_004eb8d0`) — hay que instrumentarlo en **`FUN_006cba48`**.
 - **Próximo**: instrumentar `0x6e44e4/0x6e44fc/0x6e4644` (quién deja `f5cf=1`) y
   el productor **en `FUN_006cba48`**.
+
+### 2026-10-08 — Iteración sobre el motor de DMA (sin resultado visual todavía)
+- **Productor/consumidor instrumentados en la copia correcta** (`FUN_006cba48_p2`):
+  - `prod` (`0x6e4348`): **0 ejecuciones** ⇒ el productor **nunca corre** (ni en la
+    copia que ejecuta: el `triageProd` del equipo vive en `FUN_004eb8d0`, copia
+    equivocada).
+  - `tail` (`0x6e4e04`) y `spin` (`0x6e4d98`): **corren** (head/tail = offsets
+    `0x80`/`0x90` alternando ⇒ el "ping-pong" histórico).
+- **Atajo probado — neutralizar los 3 early-returns del handler** (`0x6e40e0`,
+  `0x6e40f0`, `0x6e40fc` → editar el generado): **sí cambia algo** (`gif=3`
+  aparece por primera vez, `head/tail` pasan a `WORK`), **pero corrompe**
+  (`head=0x4c01a0`, un puntero de código; VRAM cae a 0). Demasiado agresivo ⇒
+  **revertido** (`if (false && …)` → `if (…)`), build OK.
+- **Estado del gate** (sin cambios respecto de antes): el handler de DMAC sale
+  temprano (cola vacía / `f5cf`); el productor nunca corre ⇒ el motor no encola
+  ⇒ no genera frames con contenido. El bypass demuestra que **el handler SÍ
+  puede procesar** cuando no sale, así que el camino está ahí — falta que el
+  **estado de la cola sea coherente** (hoy `head`/`tail` son offsets `0x80/0x90`
+  y el handler los compara; hay que entender **quién** los pone a `0x90`).
+- **Nota de higiene**: el generado quedó **limpio** de este atajo (revertido);
+  siguen los `fprintf` de instrumentación (`GEN-*`, `[dmairq]`, `[motorinit]`,
+  `[dmasync]`, `[prod]`, `[wp*]`, `[f5cf-force]`) como triages a limpiar al
+  cerrar el hito.
