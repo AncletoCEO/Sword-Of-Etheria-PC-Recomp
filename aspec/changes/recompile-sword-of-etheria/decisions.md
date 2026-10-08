@@ -1294,3 +1294,22 @@ A6.** Ninguna acción de esta sección se ejecutó.
   El origen es la **función de asignación llamada por `jalr`** (`*(0xA988C0)`).
 - **Próximo**: entender qué es/hace `*(0xA988C0)` (ptr `0x1000000F`) y por qué en el
   recomp la asignación devuelve `0x100` menos — ahí está la causa raíz del corrido.
+
+### 2026-10-08 — **BLOQUEANTE NUEVO**: la base viene de un `jalr` a `0x1000000F`
+- La BASE del motor (`*(gp-0x7A28)`) la devuelve `jalr *(0xA988C0)` (`0x6e6678`,
+  args `a0=0x100080`, `a1=0x00040411`).
+- **`*(0xA988C0)` = `0x1000000F`** en la consola (slot 2), `0` en slot 1. Esa
+  dirección cae en la región **`0x10000000` = registros MMIO del EE**, NO en
+  código ⇒ **saltar ahí no es ejecutable** de la forma esperada. Es un
+  **trampoline/handle** de un mecanismo que no estamos replicando.
+- **No se encuentra el escritor**: no existe ningún `sw`/`sd`/`sq` a `0xA988C0`
+  con base `0xA9` en el ELF (el único hit, `0x73c8c0`, es `sw $a1,-0x7740($gp)`
+  — base `gp`, falso positivo). ⇒ `0xA988C0` se puebla por una vía no hallada
+  (¿`jalr`/tabla construida en runtime? ¿mecanismo del kernel/libs?).
+- **Por qué es bloqueante**: sin entender ese mecanismo no puedo reproducir la
+  asignación de la base (ni el offset `0x100`) — y toda la cadena del motor
+  (ring → head/tail → handler) depende de eso.
+- **Opciones**: (a) A/B con el **debugger de PCSX2** poniendo un breakpoint en
+  `0x6e6678` y viendo quién/para qué se llama (y con qué devuelve); (b) buscar
+  `0x1000000F` / la convención `0x10000000+` en el binario y en el código del
+  recomp; (c) revisar si el runtime define trampolines ahí.
