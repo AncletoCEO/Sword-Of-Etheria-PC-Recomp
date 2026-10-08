@@ -1249,3 +1249,29 @@ A6.** Ninguna acción de esta sección se ejecutó.
 - **Próximo**: hallar de dónde salen `gp+0x5CC`/`0x60C` (¿valores leídos del
   disco/tabla?) y por qué el recomp los tiene en 0/otro — con eso el motor
   apuntaría al ring correcto y los comandos llegarían a `0xA96800`.
+
+### 2026-10-08 — Escritores de los campos del motor y cálculo del ring ptr
+- **Escritores hallados (por offset de `gp`)**:
+  - `gp+0x5F8` (**ring ptr**) ← **`0x6e66ec`** (dentro del reset `0x6e6640`).
+  - `gp+0x60C` ← **`0x6e61b4`** (`sw`).
+  - `gp+0x5CC` ← `0x6f09dc` / `0x6f09e0` (`sb`, en el **setup `0x6efd28`**).
+  - `gp+0x638` (head) ← `0x6e4348`, `0x6e4564`, `0x6e4e0c`.
+- **Cálculo del ring ptr** (`0x6e66c0..0x6e66ec`, dentro del reset del motor):
+  ```
+  0x6e66c0  lui  $v1, 0x00A9
+  0x6e66c4  lw   $v0, 0x88C4($v1)     ; v0 = *(0xA988C4)  <-- puntero a función
+  0x6e66c8  jalr $v0                  ; callback (OPCIONAL: en consola vale 0)
+  0x6e66d8  addiu $v1,$s2,-0x800
+  0x6e66e0  sll  $v0,$v0,2
+  0x6e66e4  addiu $s0,$s0,0x800       ; base + 0x800
+  0x6e66e8  subu $s2,$v1,$v0
+  0x6e66ec  sw   $s0,0x5F8($gp)       ; ring ptr
+  0x6e66f4  sb   $s0,0x604($gp)
+  0x6e66fc  sw   $v0,0x648($gp)
+  ```
+- **A/B del puntero**: `0xA988C4` = **0 en la consola** (callback vacío, ambos
+  slots) ⇒ no es la causa. Y `0xA96800` tiene los comandos en la consola;
+  `0xA96680` (el buffer que usa el recomp) tiene `… 0000007f …` en la consola.
+- ⇒ El recomp calcula una **base desplazada** (ring ptr `0xA96680` vs `0xA96800`,
+  −0x180). Hay que mirar **más arriba** en `0x6e6640` de dónde salen `s0`/`s2`
+  (la base del buffer) — ahí está la diferencia.—
