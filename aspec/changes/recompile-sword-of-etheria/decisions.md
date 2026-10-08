@@ -915,3 +915,21 @@ A6.** Ninguna acción de esta sección se ejecutó.
 - **Próximo**: o bien encontrar el **inicio real** de `0x6e68e0`/`0x6e6934` y
   hookearlo, o subir un nivel: buscar **quién debería llamar al init del motor**
   (jalr/tabla) — es el último eslabón antes del primer frame.
+
+### 2026-10-08 — El init del motor no tiene camino (código sin referencias)
+- **Prólogo real** (escaneo hacia atrás):
+  - `0x6e68e0` (reset motor) y `0x6e6934` (instala `cb`): **sin `addiu sp,sp,-N`
+    cercano** (≤0x200) ⇒ no hay prólogo propio localizable.
+  - `0x6e6cf0` (desinstala `cb`): prólogo en **`0x6e6cb8`** (`addiu sp,sp,-16`).
+- **Referencias**: **ninguna** en todo el ELF — ni punteros literales, ni
+  `lui 0x6e + addiu 0x68e0/0x6934`, ni `jal`/`j`. ⇒ **no se llaman por
+  dirección**; sólo podrían alcanzarse por **fallthrough**, y el código previo
+  termina en `jr $ra` (`0x6e6930`), así que tampoco.
+- **Conclusión**: en el desensamblado actual esas entradas **no tienen camino**.
+  Como el rango `0x6e4xxx` está cubierto por **4 "monsters" solapados**
+  (`FUN_004eb8d0`/`FUN_006cba48`/`FUN_006cc380`/`FUN_006cc400`), es probable que
+  **la estructura real esté mal** en esa zona (funciones partidas/inline).
+- **Próximo**: dejar el análisis estático de esa zona (poco confiable) y **A/B con
+  PCSX2**: ver *cuándo/dónde* el juego real inicializa su motor de DMA (primer
+  frame) y comparar contra nuestro recomp; o re-desensamblar esa zona con una
+  herramienta real (Ghidra interactivo / objdump) antes de seguir.
