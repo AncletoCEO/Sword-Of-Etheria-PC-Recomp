@@ -1211,3 +1211,41 @@ A6.** Ninguna acción de esta sección se ejecutó.
 - **Próximo (decisivo)**: instrumentar **`0x6e5cf0`** en el generado (copia
   `FUN_006cba48`) para ver si corre en el recomp; si no, ver qué rama del handler
   lo está evitando.
+
+### 2026-10-08 — El motor arma el comando pero el ring sigue vacío
+- Instrumentado `0x6e5cf0` en el generado (las 4 copias): **corre 20+ veces** en
+  el recomp ⇒ el motor **sí arma** el comando (escribe `gp+0x5C0`/`0x62C`/…).
+- **Pero el ring `0xA96800` sigue en 0x00** (volcado sigue vacío) ⇒ lo que el
+  juego arma **no llega a `0xA96800`**.
+- **Diferencia de `head`**: consola `0xA96800` (justo el ring) vs recomp
+  `0xA96680` / `0xB15A80` (otros buffers) ⇒ el recomp apunta a **otro** buffer.
+- ⇒ Hipótesis afinada: el "ring" del motor **no es `0xA96800`** sino lo apuntado
+  por su propio estado (`gp+0x5C0`/`gp+0x5DC`…), o el **commit** del comando
+  (publicar `head`) no está ocurriendo. Hay que mapear la estructura real del
+  motor (`gp+0x5C0`, `0x5DC`, `0x5E0`, `0x614`, `0x620`, `0x628`, `0x62C`) y
+  comparar **campo por campo** contra el savestate del PCSX2.
+- **Plan inmediato**: volcar en el recomp ese bloque (`gp+0x5C0`..`gp+0x640`) y
+  los buffers que apuntan, y comparar 1:1 con el savestate — el A/B ya demostró
+  que funciona para acotar diferencias.
+
+### 2026-10-08 — **A/B de estado 1:1 del motor (diferencias concretas)**
+- Volcado del bloque `gp+0x5C0..0x650` en el recomp, la **primera vez que
+  `head != 0`** (post-init), comparado con los savestates:
+  | campo | consola | recomp |
+  |---|---|---|
+  | `gp+0x5CC` | `0x01020000` | `0x00010000` |
+  | `gp+0x5DC` | `0x70002000` | `0x70002000` ✓ |
+  | `gp+0x5E0` | `0x00B1D3B0` | `0x00A9C0C0` |
+  | `gp+0x5F8` (ptr ring) | **`0x00A96800`** | **`0x00A96680`** |
+  | `gp+0x600/0x604` | `0x0007F400` / `1` | igual ✓ |
+  | `gp+0x60C` | `0x30B88D00` | **`0`** |
+  | `gp+0x638` head | **`0x00A96800`** | **`0x00A96680`** |
+  | `gp+0x63C` tail | `0x00A9E0E8` | `0x00A96690` |
+  | `gp+0x640` / `0x64C` | `0x100` / `0x00A28070` | igual ✓ |
+- ⇒ El motor del recomp **apunta a un buffer desplazado** (`0xA96680`, −0x180 del
+  real `0xA96800`) y le **faltan** `gp+0x5CC` (`0x01020000`) y `gp+0x60C`
+  (`0x30B88D00`). Eso explica que el ring "real" (`0xA96800`) quede vacío: el
+  motor **nunca escribe ahí**.
+- **Próximo**: hallar de dónde salen `gp+0x5CC`/`0x60C` (¿valores leídos del
+  disco/tabla?) y por qué el recomp los tiene en 0/otro — con eso el motor
+  apuntaría al ring correcto y los comandos llegarían a `0xA96800`.
