@@ -1127,3 +1127,29 @@ A6.** Ninguna acción de esta sección se ejecutó.
   (b) revisar si el runtime **genera las IRQ de DMAC** con la misma cadencia que
   la consola (el handler procesa según IRQ); (c) revisar el arranque `0x4c008c`
   → por si un paso de init del DMAC (que la consola hace) se está salteando.
+
+### 2026-10-08 — **A/B con savestates de PCSX2: la cola SÍ está viva en la consola**
+- **Método**: el `.p2s` de PCSX2 2.x es un **ZIP** con `eeMemory.bin` (RDRAM de
+  32 MB) + registros + `Screenshot.png`. Se parsea con `zipfile` de Python.
+  Slots: **01 = diálogo de formato**, **02 = título/menú**.
+- **Resultado (gp = 0x00A28070 en ambos)**:
+  | campo | PCSX2 slot1 | PCSX2 slot2 | recomp |
+  |---|---|---|---|
+  | `head` (gp+0x638) | **0x00A96800** | **0x00A96800** | 0x80/0x90 |
+  | `tail` (gp+0x63C) | **0x00A96830** | **0x00A9E0E8** | 0x80/0x90 |
+  | estado | **WORK** | **WORK** | EMPTY |
+  | `cb` (gp-0x7A30) | **0** | **0** | 0 |
+  | `f5cf` | **1** | **1** | 1 |
+  | `f630` | 0 | 0 | 0 |
+- **Conclusiones (corrigen hipótesis previas)**:
+  1. **`cb=0` y `f5cf=1` son idénticos en la consola** ⇒ **NO eran la causa**.
+     Se descartan como gate (el juego real funciona así).
+  2. **La cola difiere radicalmente**: en la consola `head`/`tail` son **punteros
+     reales** (`0x00A96800`, WORK ⇒ el motor está procesando); en el recomp son
+     **0x80/0x90** (offsets chicos ⇒ EMPTY ⇒ el handler sale siempre).
+- ⇒ **El gate real es la inicialización de `head`/`tail`**: en el recomp quedan
+  con valores inválidos (no el puntero al ring `0xA96xxx`), así que el handler de
+  DMAC siempre ve `head == tail` y nunca procesa.
+- **Próximo**: encontrar **quién inicializa `head`/`tail` con el puntero del ring
+  (`0xA96800`)** y por qué en el recomp no ocurre (o queda sobrescrito). Candidato
+  claro y acotado.
