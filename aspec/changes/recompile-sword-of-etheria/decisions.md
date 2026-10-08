@@ -819,3 +819,23 @@ A6.** Ninguna acción de esta sección se ejecutó.
 - **Próximo**: con esto claro, instrumentar **head/tail/cb/630/5CF en el
   momento del handler de DMA** (no en el harness viejo) para ver si el
   productor deja `head != tail` y el handler lo ve; y por qué `cb == 0`.
+
+### 2026-10-08 — Estado de la cola en el dispatch del handler de DMA
+- **Instrumentado** `PS2Runtime::drainCompletedDmacHandlers`
+  (`[dmairq] n=.. cause=.. head=.. tail=.. EMPTY|WORK f630=.. f5cf=.. cb=..`),
+  leyendo `gp+0x638/0x63C/0x630/0x5CF` y `gp-0x7A30` (cb) del RDRAM **justo
+  antes** de despachar.
+- **Resultados (60s)**:
+  - El handler se despacha muchas veces (`cause=1` dominante, también `2` y `8`).
+  - La cola **se mueve**: hay despachos `WORK` (`head != tail`, p.ej.
+    `head=0xa96680 tail=0xa96690`) y `EMPTY` (`head == tail`).
+  - **`cb=0x0` en TODOS** ⇒ el callback que el spin (`0x6e4d98`) invoca nunca
+    está instalado ⇒ el spin gira sin consumir.
+  - El flag **`gp+0x5CF` aparece en 1** en varios despachos ⇒ el handler sale
+    también por `0x6e40fc: bne *(gp+0x5CF),0 → epílogo`.
+- **Lectura**: el motor **sí** encola/despacha DMA (head/tail avanzan, y hay
+  kicks), pero (a) el **callback nunca se instala** y (b) el flag `5CF` frena
+  el handler a menudo. Y el volumen es bajísimo (32 kicks/60s).
+- **Próximo**: ver quién debería instalar `cb` (`gp-0x7A30`) y quién pone
+  `gp+0x5CF = 1` (escritores detectados: `0x511ef4`, `0x511f44`, `0x6e44e4`,
+  `0x6e44fc`, `0x6e4644`, `0x6e690c`) — ahí está el freno real.
