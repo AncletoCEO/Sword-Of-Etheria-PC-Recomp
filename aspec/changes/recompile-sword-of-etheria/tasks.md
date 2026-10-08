@@ -112,7 +112,7 @@
 - [x] Descartar el **kick GIF** (`0x6e47e4`) como gate: la consola también lo salta (`*(gp+0x3C0)=0`).
 
 ### 4.9.1 — Acelerar el ciclo de iteración
-- [ ] Instrumentar/parchear **sólo `work/generated/FUN_006cba48_0x6cba48_p2.cpp`** (la copia viva; verificado con los tags `[GEN-B*]`) ⇒ ~2 min en vez de ~8 min por ciclo.
+- [x] **Procedimiento**: editar/instrumentar **sólo `work/generated/FUN_006cba48_0x6cba48_p2.cpp`** (la copia viva; verificado con los tags `[GEN-B*]`). Las otras 3 copias ya quedaron con inserciones inertes (bajo `env` OFF) y **no se vuelven a tocar** ⇒ sólo se recompila `p2` (~2-3 min en vez de ~8).
 - [ ] Consolidar atajos/instrumentación en **un `env` por experimento** + helper `fprintf` compartido.
 
 ### 4.9.2 — Ruta real del render (eslabón faltante)
