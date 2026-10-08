@@ -1020,3 +1020,27 @@ A6.** Ninguna acción de esta sección se ejecutó.
 - **Próximo**: instrumentar dentro de **`FUN_006cba48`** el tramo del reset
   (`0x6e68e8..0x6e6914`: `sb 0x630`, `sw 0x5dc/5e0/5e4/5e8/5ec`, `sb 0x5cf`,
   `sb 0x640`) para ver **dónde sale** y con qué deja `f5cf`/`cb`.
+
+### 2026-10-08 — El reset completa; `f5cf` vuelve a 1 después; forzarlo no alcanza
+- **Instrumentado** el tramo del reset en `FUN_006cba48_p2` (`fprintf` en
+  `0x6e690c`, `0x6e6914`, `0x6e6918`, `0x6e6928`):
+  ```
+  [GEN-B2] 6e6640-init    n=1
+  [GEN-B2] after-sb5cf    n=1 f5cf=0 f630=0
+  [GEN-B2] after-sb640    n=1 f5cf=0 f630=0
+  [GEN-B2] reset-epilogue n=1 f5cf=0 f630=0
+  [GEN-B2] jr-ra          n=1 f5cf=0 f630=0
+  ```
+  ⇒ **el reset COMPLETA** (deja `f5cf=0`) y llega al `jr $ra`.
+- **Pero** en runtime `f5cf` vuelve a **1** después: los otros escritores de
+  `5CF` (`0x6e44e4`, `0x6e44fc`, `0x6e4644`) están **dentro del handler de DMAC**
+  ⇒ el handler lo pone en 1 (busy) y nadie lo baja.
+- **Atajo probado** (`SWORD_FORCE_F5CF=1` en `drainCompletedDmacHandlers`: fuerza
+  `gp+0x5CF=0` antes de despachar): **sin efecto** — el handler ya no sale por
+  `f5cf`, pero **sigue saliendo por `head == tail`** (`EMPTY`): la cola está
+  vacía ⇒ no hay nada que procesar. `gif=2`, VRAM 262144.
+- **Estado**: el freno efectivo pasó a ser **la cola vacía** (el productor
+  `0x6e4348` no encola). Y recordar que ese hook vive en la copia equivocada
+  (`FUN_004eb8d0`) — hay que instrumentarlo en **`FUN_006cba48`**.
+- **Próximo**: instrumentar `0x6e44e4/0x6e44fc/0x6e4644` (quién deja `f5cf=1`) y
+  el productor **en `FUN_006cba48`**.
