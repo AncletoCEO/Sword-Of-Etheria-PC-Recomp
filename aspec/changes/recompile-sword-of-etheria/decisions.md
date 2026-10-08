@@ -1514,3 +1514,19 @@ A6.** Ninguna acción de esta sección se ejecutó.
   `0x1101`/`0x41`/`0x1042`), no de *draw*; el camino al XGKICK/GS debe estar en
   otro lado (o el handler procesa pero no llega a emitir).
 - **Estado**: motor alineado y correcto; falta el eslabón ring → GIF.
+
+### 2026-10-08 — Traza de la cadena del ring: falta el kick GIF
+- Instrumentados en un solo build: `spin`(0x6e4d98), `cons1101`(0x6e58d0),
+  `kick-vif1`(0x6e433c), `kick2`(0x6e4468), `kick-gif`(0x6e47e4).
+- Resultado (con `SWORD_MOTOR_PAD=1`):
+  `cons1101 ✓`, `spin ✓`, `kick2(4468) ✓` — pero **`kick-vif1(433c)=0` y
+  `kick-gif(47e4)=0`** ⇒ **el recomp NUNCA hace el DMA del framebuffer al GIF**.
+  Eso explica `gif=2` (los 2 del arranque).
+- **El motor está alineado**: con el pad, `[dmairq]` muestra los **mismos
+  buffers que la consola** (`head=0xB15C00 tail=0xB15C10`, y `0xA96800`).
+- **Atajos probados sin efecto** sobre `kick-gif`: `SWORD_FORCE_F5CF=1` y
+  `SWORD_FORCE_3C0=0x104` (la condición `*(v0+0x3C0)!=0` del tramo) ⇒ **hay otra
+  rama** que evita el tramo `0x6e47c0..0x6e47f8` del handler.
+- **Próximo**: instrumentar el tramo `0x6e4494..0x6e47c0` del handler para ver
+  **dónde** se desvía antes del kick GIF (ese es el último eslabón al primer
+  frame con contenido).
