@@ -1391,3 +1391,40 @@ A6.** Ninguna acción de esta sección se ejecutó.
 - **Conclusión**: el gate es la **instalación/uso de esa tabla `0x10000000+`**
   (los punteros de alloc/free del motor salen de ahí y en el recomp están sin
   inicializar/basura) ⇒ la asignación devuelve `0x150` menos ⇒ sin frames.
+
+### 2026-10-08 — Búsqueda en el ELF del mecanismo `0x100000xx` (no concluyente)
+- Escaneo del ELF por construcciones `0x10000000+` (`lui 0x1000`+`ori/addiu`): 52
+  sitios (p.ej. `0x6e61e4` → `0x10000040`, `0x6e525c` → `0x10000017`).
+- Los valores `0x100000xx` aparecen **muchísimo** en el ELF (`0x10000002`×2123,
+  `0x10000008`×1563, `0x1000000F`×330…). **PERO** al mirar el contexto
+  (`0x4c03d4`) se ve que son **instrucciones**, no datos: `0x10000004` = `beq
+  $0,$0,+4` (op=4), en medio de `sw` y un `jal` ⇒ **falso positivo**.
+- Por lo tanto: **la "tabla de handles en el ELF" NO existe** como tal. Los
+  valores `0x100000xx` que sí son datos están en el **savestate** (en `0xA938xx`,
+  `0xA8D1xx`, escritos por el juego en runtime) — no en el binario.
+- **Lo que queda firme** (evidencia dura):
+  1. **`jalr *(0xA988C0)`** es el allocator del motor; devuelve `0xA95E50` en el
+     recomp vs `0xA95FA0` en consola ⇒ **`+0x150`**.
+  2. `0xA988C0` en el recomp = **`0x43400000`** (+vecinas `0x55555555`); en la
+     consola = `0`/`0x1000000F` ⇒ **la zona está sin inicializar/basura**.
+- **Próximo**: (a) averiguar **qué escribe `0xA988C0`** con el valor correcto
+  (¿un `jalr`/tabla construida en runtime? ¿copia de stub?); (b) A/B del bloque
+  `0xA988B8..0xA988C8` en varias fases; (c) revisar si el runtime deja esa zona
+  con `0x55555555` (patrón) — aunque el grep no lo encontró en el código.
+
+### 2026-10-08 — Descartado: la RDRAM del recomp arranca en **0** (no un patrón)
+- `ps2_memory.cpp:340`: `std::memset(m_rdram, 0, ramSize)` ⇒ la RDRAM del recomp
+  arranca en **cero, igual que PCSX2**. ⇒ el **`0x55555555`** de `0xA988B8/BC`
+  **no** es un patrón de relleno del runtime (grep en `tools/PS2Recomp` sin
+  coincidencias fuera de tests) — **lo escribe el juego/copia**, y por el
+  corrimiento `+0x150` cae en otro lado que en la consola.
+- **Estado consolidado del bloqueo** (lo único firme):
+  1. El **heap/allocator del motor** reparte `~0x150` menos en el recomp.
+  2. El puntero del allocator (`0xA988C0`) está **sin inicializar** en el recomp.
+  3. La RDRAM arranca en 0 en ambos ⇒ no es un problema de inicialización global.
+- **Siguiente vía (requiere datos que no tengo sin vos)**: A/B del bloque
+  `0xA988B0..0xA988D0` **en la misma fase** (el recomp no llega al diálogo, así que
+  parte del ruido es de fase) o un breakpoint en `0x6e6678`/`0x51f468` en PCSX2.
+- **Nota de mantenimiento**: quedan **4 triages activos** para limpiar al cerrar:
+  `[motor]`+`SWORD_RDRAM_DUMP`, `cb-install`/`SWORD_CB_PRODUCER`, `[cdread-data]`,
+  y los `fprintf` `[GEN]`/`[triage-*]` del generado.
