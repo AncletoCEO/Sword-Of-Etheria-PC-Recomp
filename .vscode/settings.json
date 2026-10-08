@@ -1,0 +1,7 @@
+{
+  "//": "Clones externos con su propio .git dentro del workspace: VS Code los detecta como repos propios y ofrece pushear ahi. Se ignoran para que Source Control solo muestre el repo del juego (que los tiene gitignored).",
+  "git.ignoredRepositories": [
+    "ghidra-mcp",
+    "tools/PS2Recomp"
+  ]
+}
