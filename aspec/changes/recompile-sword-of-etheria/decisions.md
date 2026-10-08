@@ -1172,3 +1172,17 @@ A6.** Ninguna acción de esta sección se ejecutó.
   cola→DMA no está cerrándose por los `head`/`tail` inválidos.
 - **Próximo**: ver **quién escribe los comandos** en el ring (`0xA96800+`) y quién
   fija `head`/`tail`; comparar con el recomp (donde la cola nunca se llena).
+
+### 2026-10-08 — El ring no es data del ELF: se llena en runtime
+- **Segmentos del ELF**: `[0x4C0000, 0xA93700)` (5.8 MB) y `[0x100000, 0x154000)`;
+  BSS vacío.
+- El **ring `0xA96800` cae justo ARRIBA** del final del segmento (`0xA93700`) ⇒
+  **NO es data inicializada**: es **RAM que el juego llena en runtime**. (El `gp`
+  `0xA28070` sí está dentro del segmento cargado.)
+- ⇒ **Gate final**: existe una función que **arma y escribe los comandos del ring**
+  (`[tag][addr]` de 16 B) que en el recomp **no corre** (o corre mal) ⇒ la cola
+  queda sin llenar ⇒ `head==tail` ⇒ el handler de DMAC sale ⇒ sin render.
+- **Balance del día**: avance de diagnóstico **grande** (A/B con savestates
+  funcional; formato de la cola; `cb`/`f5cf` descartados por A/B), aunque **sin
+  imagen con contenido todavía**. Próximo paso bien acotado: hallar al
+  **escritor del ring** y por qué no corre en el recomp.
