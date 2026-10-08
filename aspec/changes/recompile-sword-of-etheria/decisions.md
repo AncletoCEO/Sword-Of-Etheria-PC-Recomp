@@ -1275,3 +1275,22 @@ A6.** Ninguna acción de esta sección se ejecutó.
 - ⇒ El recomp calcula una **base desplazada** (ring ptr `0xA96680` vs `0xA96800`,
   −0x180). Hay que mirar **más arriba** en `0x6e6640` de dónde salen `s0`/`s2`
   (la base del buffer) — ahí está la diferencia.—
+
+### 2026-10-08 — **Base del motor: la clave del desplazamiento (−0x100)**
+- Inicio del reset (`0x6e6640`): `ring ptr = align128(*(gp-0x7A28)) + 0x800`
+  (`0x6e6694..0x6e66a8` alinea a 0x80; `0x6e66e4` suma 0x800).
+- **La BASE `*(gp-0x7A28)` la devuelve una llamada indirecta `jalr *(0xA988C0)`**
+  (`0x6e6678`, args `a0=0x1080`, `a1=0x00040411`) — una **función de asignación**.
+- **A/B de la base (savestates)**:
+  | campo | consola |
+  |---|---|
+  | `gp-0x7A28` (BASE) | `0x00A95FA0` |
+  | `align128(BASE)+0x800` | `0x00A96780` |
+  | `gp-0x7A34` (inicio) | `0x00A96000` |
+  | `gp-0x7A2C` | `0x04000000` |
+  | `0xA988C0` (fn) | `0x1000000F` (slot2) / `0` (slot1) |
+- **Diferencia**: el recomp tiene ring ptr `0xA96680` ⇒ su `align128(BASE)` =
+  `0xA95E80` vs **`0xA95F80`** de la consola ⇒ **la BASE está `0x100` más abajo**.
+  El origen es la **función de asignación llamada por `jalr`** (`*(0xA988C0)`).
+- **Próximo**: entender qué es/hace `*(0xA988C0)` (ptr `0x1000000F`) y por qué en el
+  recomp la asignación devuelve `0x100` menos — ahí está la causa raíz del corrido.
