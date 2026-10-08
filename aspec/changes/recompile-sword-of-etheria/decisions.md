@@ -1439,3 +1439,28 @@ A6.** Ninguna acción de esta sección se ejecutó.
   diálogo).
 - **Todo commiteado y pusheado** (ver `git log`); artifacts al día
   (`design.md` §10, `tasks.md` Fase 4.8, `decisions.md`).
+
+### 2026-10-08 — **A/B fase por fase (8 savestates) + el motor FUNCIONA**
+- Savestates del arranque completo (gracias al usuario): 1=negro, 2=formato,
+  3=conf60, 4=idioma, 5=konami, 6=press-start, 7=newgame, 8=menú.
+- **Evolución en la consola**: slot 1 (negro) tiene **todo en 0** (motor sin
+  inicializar); en el **slot 2** (formato) la **base pasa a `0xA95FA0`** y el
+  **ring `0xA96800` ya tiene 1773 comandos** ⇒ **la ventana de divergencia es el
+  init del motor (slot 1→2)**.
+- **Descartado**: `alloc` (`0xA988C0`) **también tiene "basura" en la consola**
+  (`0x3F009A34`, `0x43C00000`, …) en las fases 3-7 ⇒ el `0x43400000` del recomp
+  **no es una anomalía**; el bloqueante anterior queda **anulado**.
+- **🎯 EL MOTOR FUNCIONA**: comparando buffers,
+  ```
+  0xA96680 recomp : 00001101 00a96700 | 00000041 00a8d0b0   <- comandos validos
+  0xA96800 consola: 00001101 00a96880 | 00000041 00a8d0b0   <- idem
+  ```
+  ⇒ el recomp **genera exactamente la misma estructura de comandos**, sólo que
+  apuntando al buffer **corrido `0x180`**. Los dos buffers tienen ~170 comandos.
+- **Conclusión**: el motor está **vivo y correcto**; el único problema es el
+  **offset del heap (~0x150/0x180)** ⇒ el render no aparece porque el motor
+  trabaja sobre buffers corridos.
+- **Próximo (directo al fix)**: encontrar por qué el **heap del juego** arranca
+  `~0x180` más abajo (`inicio` = `0xA96000` consola vs `0xA95E80` recomp) — el
+  `SetupHeap`/`sbrk` o el primer `alloc`. Con eso, el motor apuntaría al ring real
+  y debería aparecer imagen.
