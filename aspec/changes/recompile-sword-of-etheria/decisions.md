@@ -1499,3 +1499,18 @@ A6.** Ninguna acción de esta sección se ejecutó.
   de env (`SWORD_MOTOR_PAD`), anotado como triage.
 - **Próximo**: con el ring ya alineado, comparar `[dmairq]`/los comandos del ring
   contra la consola para ver **qué falta** en la cadena hasta el GIF.
+
+### 2026-10-08 — Con `SWORD_MOTOR_PAD` el ring coincide (primer comando idéntico)
+- Diff del ring con el pad activo vs savestate del menú (slot 8):
+  ```
+  0xA96800: recomp=00001101 00A96880   consola=00001101 00A96880   <- IDENTICO
+  0xA96808: recomp=00000041 00A8D0B0   consola=00001042 00BA1D18   (otra fase)
+  comandos en ring: recomp=347  consola=330
+  ```
+  ⇒ **el motor alineado genera los comandos correctos** (mismo `0x1101` + self
+  pointer `0xA96880`).
+- **Pero** `gif=2` sigue ⇒ el ring se llena pero **no se traduce en GIF/render**.
+  Hipótesis nueva: los comandos del ring son de **transferencia DMA** (tags
+  `0x1101`/`0x41`/`0x1042`), no de *draw*; el camino al XGKICK/GS debe estar en
+  otro lado (o el handler procesa pero no llega a emitir).
+- **Estado**: motor alineado y correcto; falta el eslabón ring → GIF.
