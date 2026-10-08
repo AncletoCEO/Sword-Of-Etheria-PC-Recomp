@@ -878,3 +878,22 @@ A6.** Ninguna acción de esta sección se ejecutó.
   **`runtime.replaceFunction(0x6e4348u, …)`** (funciona, el equipo ya lo hizo
   como `triageProd`) o editar el generado en las **4 copias**; o probar
   watchpoints en `Store128/Store64`.
+
+### 2026-10-08 — El productor `0x6e4348` **nunca se ejecuta** (motor sin arrancar)
+- **Extendido `triageProd`** (`replaceFunction(0x6e4348u, …)`, que sí funciona
+  aunque el `sw` lo emule el hook) para loguear `head/tail/630/5CF/cb` antes de
+  encolar: `[prod] n=… headPrev=… newHead=… tail=… f630=… f5cf=… cb=…`.
+- **Resultado**: **cero líneas `[prod]` en 55s** ⇒ el juego **nunca ejecuta
+  `0x6e4348`** ⇒ la cola **nunca se llena** por el productor.
+  (Los 32 kicks/60s salen del **otro** camino, `pc=0x6e4468`, no del productor.)
+- **Círculo vicioso confirmado**: el handler de DMAC (`0x6e4068`) sale temprano
+  (`head==tail` y/o `f5cf!=0`) → no llega al productor → la cola no se llena →
+  el handler sigue viéndola vacía. Y el **arranque del motor** (instalar `cb`
+  en `0x6e6934` + resetear `5CF` en `0x6e68e0`) **nunca ocurre** (0 callers
+  estáticos y `cb=0` en runtime).
+- **Conclusión**: el juego **no inicializa su motor de DMA/render**. El gate es
+  el **init del motor** — hay que ver si `0x6e68e0`/`0x6e6934` se ejecutan
+  (hookearlos con `replaceFunction`) y quién debería llamarlos.
+- **Próximo**: `replaceFunction(0x6e68e0, log)` y `replaceFunction(0x6e6934, log)`
+  para confirmar si el init corre en runtime (independiente de callers
+  estáticos), y si no, rastrear su caller por otras vías (jalr / tablas).
