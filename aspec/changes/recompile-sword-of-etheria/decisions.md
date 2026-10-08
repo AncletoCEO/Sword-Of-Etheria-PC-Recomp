@@ -933,3 +933,32 @@ A6.** Ninguna acción de esta sección se ejecutó.
   PCSX2**: ver *cuándo/dónde* el juego real inicializa su motor de DMA (primer
   frame) y comparar contra nuestro recomp; o re-desensamblar esa zona con una
   herramienta real (Ghidra interactivo / objdump) antes de seguir.
+
+### 2026-10-08 — **GATE REAL**: spin de DMA antes del init del motor (`0x6f0920`)
+- **Corrección del desensamblado** (búsqueda de prólogo ampliada a 0x1000):
+  - `0x6e68e0` **NO es función**: es código **interior** de la función que
+    empieza en **`0x6e6640`** (`addiu sp,sp,-64`). El `jr $ra` de `0x6e6928`
+    es un early return. (Por eso el hook en `0x6e68e0` no disparaba: era
+    interior.)
+  - `0x6e6934` **sí** es función hoja (`sw $a0,-0x7A30($gp); jr $ra`).
+- **Hookeado `0x6e6640`** (entrada real, `lookup=OK`): **cero disparos** ⇒
+  **la función de reset del motor nunca corre**. Y `0x6e6934` tampoco.
+- **Caller de `0x6e6640`**: **uno solo** en todo el ELF — **`0x6f0950`**.
+  Desensamblado de su función:
+  ```
+  0x6f0920  jal 0x4d1a60 (a0=1)
+  0x6f0928  bne $v0, 0 -> 0x6f0920      ; <-- SPIN mientras v0 != 0
+  0x6f0938  ori $v0,0x1000,0xE010        ; 0x1000E010 = D_STAT (DMAC)
+  0x6f0940  sw 4 -> D_STAT               ; reset DMAC
+  0x6f0944  sw $zero, 0x3CC($s0) ... 0x3C0($s0)   ; limpia el campo 0x3C0
+  0x6f0950  jal 0x6e6640                 ; <-- init del motor (NUNCA se llega)
+  ```
+- **Qué es `0x4d1a60`**: **espera de DMA** — con `a0==0` lee el **CHCR de VIF1**
+  (`0x10009000`) y espera a que se limpie el bit de start; con `a0!=0`
+  (`0x4d21d4`) hace `ld 0x12001000` y espera el **bit 1** (con timeout por
+  `sltu`/contador).
+- **CONCLUSIÓN**: el juego queda **girando en un sync de DMA (`0x6f0920`)**
+  **antes** de inicializar el motor ⇒ no instala `cb`, no resetea `5CF`, el
+  handler de DMAC sale, el productor nunca corre, **no hay frames**. **Ese es el
+  gate real**, y es donde hay que mirar: por qué nuestro runtime no satisface esa
+  espera (`0x12001000` bit 1 / CHCR de VIF1/GIF).
