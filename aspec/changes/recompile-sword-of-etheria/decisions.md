@@ -1725,3 +1725,19 @@ A6.** Ninguna acción de esta sección se ejecutó.
   `0x610`, `0x614`, …), de donde sale el micro/la geometría.
 - **Consecuencia**: el fix completo es (a) **corregir el corrimiento en origen**, o
   (b) compensar **todos** los punteros del motor, no sólo `s0`.
+
+### 2026-10-08 — Fix (b) no alcanza; (a) apunta a `0x6e58b8` (el "handle" 0x1000000F)
+- **Fix (b)** (`SWORD_FIX_SHIFT`: compensar `+0x180` los buffers del motor en
+  `0x6e5cf0`): **sin efecto** — el micro sigue `102e07f0` y `gif=2`. ⇒ el buffer del
+  micro **no** sale por ahí.
+- **(a)**: el valor `0x1000000F` (el que la consola escribe en `0xA988C0`) se
+  construye en **4 sitios** (`0x70deb0`, `0x711a5c`, `0x71ad84`, `0x75c7a0`), y los
+  tres primeros tienen la misma forma:
+  ```
+  jal 0x6e58b8            <- funcion del MOTOR (0x6e5xxx)
+  lui $v1,0x1000 ; ori $v1,$v1,0xF    ; v1 = 0x1000000F  (el "handle")
+  lw  $v0,0x5C0($gp) ; addiu ; sw $v0,0x5C0($gp)  ; avanza la cola interna
+  ```
+  ⇒ **`0x6e58b8` es la funcion clave** que precede al "handle" `0x1000000F`.
+- **Próximo (a)**: desensamblar `0x6e58b8` (y su relación con `0xA988C0`) para
+  encontrar la **primera asignación** y por qué reparte `0x180` menos.
