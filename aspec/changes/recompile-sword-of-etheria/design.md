@@ -204,6 +204,38 @@ Ideas aplicables, en orden de coste:
 - Thread 1 alcanzó el bucle principal de renderizado (`0x6d6a6c`), logrando la activación del **Double Buffering Flip a 60 FPS** (`dispfb1` alternando dinámicamente entre `0x1000` y `0x1080`).
 - Por primera vez se escribió contenido gráfico en la memoria de video de GS: **`vramNonZero = 262144 / 4194304` (256 KB)**, con resolución configurada por el motor a 512x512.
 
+### 10.1 Análisis de arriba a abajo (datos del savestate vs recomp) — 2026-10-08
+
+> Pedido del usuario: recorrer **todo** lo que tenemos sin dejar nada afuera.
+
+**Inventario de datos disponibles** (todo del `.p2s`; **no hace falta debugger**):
+
+| artefacto | contenido | ¿analizado? |
+|---|---|---|
+| `eeMemory.bin` | RDRAM 32 MB | ✅ diff vs recomp (`rdram_diff.py`, 8–13 %) |
+| `GS.bin` | VRAM 4 MB + 509 B | ✅ conteo por bloque |
+| `PCSX2 Internal Structures.dat` | `cpuRegs` (GPR, 16 B c/u), `EE-Subsystems`, `vuMicroRegs`, `VIF1dma`, `Gif Unit`, … | ✅ GPR (32) extraídos; ⏳ subsistemas |
+| `vu1Memory/vu1MicroMem.bin` | data + micro del VU1 | ⏳ pendiente |
+| `iopMemory.bin` | RAM del IOP | ⏳ pendiente |
+| `Screenshot.png` | frame real | ✅ referencia visual |
+| dumps/logs del recomp | RDRAM, VRAM, regs, counters | ✅ |
+
+**Resultado firme: el hilo principal del real y el del recomp están en el MISMO loop**
+(el spin `0x6e4d98`, dentro de `0x6e4848`), pero **en puntos distintos**: el real en
+`pc=0x6E4CDC` (tras el `jal 0x6e4848`), el recomp en `0x6E4B14`/`0x6E4468`.
+**Ojo**: `0x6E4CDC` y `0x6E4F08` son el **mismo bloque duplicado** en el binario ⇒ no
+es divergencia de lógica.
+
+**Registros del real (slot 6/7)**: `v0`/`v1`/`s1` apuntan al **ring** (`0xA96800`),
+`s1 = gp+0x5F8`, `a2=3`, `a3=0x44`, `sp=0x1FFDBA0`, `ra=0x6E4CDC`, `gp=0xA28070`.
+⇒ el real está **vivo en el motor** (coincide con que el ring se llena).
+
+**Pendiente (para "no dejar nada afuera")**:
+1. Histograma de `pc` del recomp (¿pasa por `0x6E4CDC`? ¿por cuáles no?).
+2. A/B **GPR por GPR** (loguear los del recomp en el mismo pc).
+3. Barrer `vu1Memory`/`vu1MicroMem`/`iopMemory` del savestate contra el recomp.
+4. Comparar `Screenshot.png` vs la VRAM del recomp por fase.
+
 ### 10. A/B con PCSX2 y estado real del bloqueo (2026-10-07)
 
 - **Método (sin BIOS ni emulador en CI: es referencia local)**: PCSX2 2.8.2 +
