@@ -1606,3 +1606,23 @@ A6.** Ninguna acción de esta sección se ejecutó.
   el microcódigo VU1 se arranca por otro camino (¿los paquetes del ring?).
 - **Próximo**: (a) por qué el color es 0 (¿microcódigo VU1 incompleto / datos no
   cargados?), (b) corregir el FBP `0x80`→`0x100` (el *mismo* corrimiento a matar).
+
+### 2026-10-08 — BLOQUEO: todo el pipeline VU1/GS funciona, pero el juego no dibuja
+- **El microcódigo VU1 SÍ se carga**: `[MPG] #1 dest=0x0 bytes=376 first=102e07f0`
+  (un único MPG de 376 B), y el VU1 lo ejecuta entero (`endPc=0x168`).
+- Con esto **queda descartado el microcódigo** y, sumando lo anterior, **todo el
+  pipeline está verificado sano**: VIF1 → VU1 → XGKICK → GIF → GS rasteriza.
+- **El síntoma es aguas arriba**: el juego **no emite geometría con contenido**
+  (color 0, pocos draws) ⇒ VRAM sin RGB ⇒ sin imagen. Es decir, **el juego no está
+  renderizando frames**.
+- **Por qué es bloqueo**: no queda nada de la cadena por descartar; lo que falta es
+  **por qué el juego no llega a dibujar**. El análisis estático y los triages
+  locales ya no lo responden.
+- **Opciones para destrabar**:
+  1. **Debugger de PCSX2 con el juego corriendo** (`Boot ISO (fast)` + abrir el
+     debugger ya con el juego andando) para ver **qué hace el real** en el momento
+     del render (qué función, qué estado).
+  2. **A/B de estado en la MISMA fase** (hoy imposible: el recomp no llega al
+     diálogo) — o comparar el `Screenshot.png`/`GS.bin` de fases tempranas.
+  3. Revisar si el juego usa **otro camino de draw** (p.ej. un `sceGs...` del
+     kernel) que el recomp esté stubeando como no-op.
