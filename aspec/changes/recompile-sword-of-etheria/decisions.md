@@ -1626,3 +1626,16 @@ A6.** Ninguna acción de esta sección se ejecutó.
      diálogo) — o comparar el `Screenshot.png`/`GS.bin` de fases tempranas.
   3. Revisar si el juego usa **otro camino de draw** (p.ej. un `sceGs...` del
      kernel) que el recomp esté stubeando como no-op.
+
+### 2026-10-08 — Del savestate salen los pc del real: MISMO spin que el recomp
+- El `.p2s` trae `PCSX2 Internal Structures.dat` con secciones (`cpuRegs`, `Cycles`,
+  `EE-Subsystems`, `vuMicroRegs`, `VIF1dma`, `Gif Unit`, …) ⇒ **no hace falta el
+  debugger**: los datos del real están todos en el savestate.
+- Usando el **`gp` (0x00A28070) como firma** para ubicar los registros del EE, los
+  `pc`/`ra` del hilo principal del real son, **en las 8 fases**:
+  `0x6e4cdc`, **`0x6e4d98`** (¡el spin!), `0x6e4dbc`.
+- ⇒ **El recomp está en la MISMA fase y el MISMO loop que el real** (el spin
+  `0x6e4d98`, que ya conocíamos). La divergencia **no es "dónde está"** sino **qué
+  produce ese loop** (refuerza el cuadro: color 0 / Datos).
+- **Próximo**: A/B de **registros/estado** (no sólo el pc) entre el real (del blob)
+  y el recomp, en la misma fase — para ver el campo exacto que difiere.
