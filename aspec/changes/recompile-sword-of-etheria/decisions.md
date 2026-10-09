@@ -1666,3 +1666,16 @@ A6.** Ninguna acción de esta sección se ejecutó.
 - **Pendiente (análisis de arriba a abajo pedido por el usuario)**: validar el offset
   de registros en el blob; comparar **GPR por GPR**; y barrer el resto de artefactos
   (no sólo pc/ra/sp).
+
+### 2026-10-08 — 🎯 La memoria del VU1 difiere (micro y data) — candidato al color 0
+- Comparado el `.p2s` (real) contra el recomp:
+  | | real (savestate) | recomp |
+  |---|---|---|
+  | `vu1MicroMem` | **2048 words (16 KB, llena)**; empieza `f303ff0187102200…` | **376 B**; empieza `102e07f0` |
+  | `vu1Memory` (data) | **709 words con datos** | sin carga observada |
+- ⇒ **el microcódigo del real es otro y mucho más grande**, y la **data del VU1**
+  (donde viven vértices/colores) tiene **709 entradas** que el recomp **no carga**.
+- **Hipótesis fuerte (y la mejor hasta ahora)**: sin data en el VU1, el XGKICK emite
+  paquetes sin color/geometría real ⇒ **VRAM sin RGB** (encaja con el `RGBAQ=0`).
+- **Próximo**: instrumentar el **UNPACK a VU1 data** en el VIF1 interpreter (¿el
+  recomp lo hace?) y comparar el micro/data del real contra el recomp en la misma fase.
