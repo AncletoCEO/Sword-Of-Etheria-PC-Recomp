@@ -67,6 +67,89 @@
 - [ ] Servir `SD.BIN` según comando de 16 B una vez conocido su layout (destino guest + tamaño); verificar datos en destino y avance de cola (`a==b` estable)
 - [ ] Drenar cola y revertir triages (`triage-vis`, `triage6e4d98`, `libsd→v0=1`): `gif>2` sostenido, VRAM con escena sin magenta, menú visible; recién ahí tag `v0.1.0`
 
+## Fase 4.7 — Desbloqueo de salida visual y coordinación multi-hilo EE/IOP (2026-10-07)
+
+- [x] **Diagnóstico de VBlank acelerado**: ajuste de frecuencia de log en `triage6e45d8wrap` de 10s (600 VBs) a 1s (60 VBs) para inspección de scheduling en tiempo real (`tools/PS2Recomp/ps2xRuntime/src/lib/game_overrides.cpp`).
+- [x] **Auditoría y corrección de truncamientos de Ghidra en rango `[0x4c0000, 0x4eb8d0)`**:
+  - `FUN_004c6020`: restaurado branch delay slot y epílogo (`jr $ra; addiu $sp, $sp, 0x20`).
+  - `FUN_004d39a0`: completado epílogo (`jr $ra; addiu $sp, $sp, 0x40`).
+  - `FUN_004d73e8` (`sceSifCheckStatRpc`): retorno inmediato a `$ra`.
+  - `FUN_00628980` (`WaitThread3Complete`): restaurados `$s0`, `$ra` y ajuste de `$sp`.
+  - `FUN_004d3730`: reconstruidas 12 instrucciones truncadas de DMAC `D_STAT` canal GIF (bit 2), sincronización y encadenamiento con `entry_004d3770`.
+  - `FUN_004c18f0`: restaurado `lw $v0, 7152($v1)` en delay slot y retorno a `$ra`.
+  - `FUN_004d3960`, `FUN_004d3988`, `FUN_004d3998`, `FUN_004d3aa0`, `FUN_004d3ac8`: restaurados epílogos, delay slots y retornos.
+- [x] **Corrección arquitectónica en `EeScheduler` (`blockCurrent` y `transferIfRequested`)**:
+  - Descubierto que `throw EeDispatcherTransfer{}` abortaba funciones recompiled de syscalls antes de asignar `ctx->pc = $ra`, congelando el hilo en el PC del syscall (`0x4d31c0` / `0x4d31d0`) y ciclando en bucle infinito.
+  - Implementado `self->activeContext().pc = ra` en `blockCurrent()` y `transferIfRequested()` (`tools/PS2Recomp/ps2xRuntime/src/lib/Kernel/EeScheduler.cpp`), garantizando reanudación correcta en el llamador.
+- [x] **Desbloqueo de VRAM y pipeline de presentación**:
+  - Hilo 1 superó la sincronización con Hilo 3 y alcanzó el render loop principal (`0x6d6a6c`).
+  - Activado **Double Buffering Flip a 60 FPS** (`[TYOSD-ab] ... FLIP`, alternando `dispfb1` entre `0x1000` y `0x1080`).
+  - Hito alcanzado: **`vramNonZero = 262144 / 4194304` (256 KB)** por primera vez.
+  - Métricas smoke (35s): `tick_max=2066`, `transfers_30000=11`, `muestras=203`, capturas 512x512 en `/tmp/opencode/shot_vb_*.bmp`.
+
+## Fase 4.8 — A/B con PCSX2 y convergencia al primer render (2026-10-07)
+
+> Referencia real (PCSX2): diálogo de formato de video → **título** → **menú principal** (Quit Game/Save/Story Mode). El recomp debe reproducir esas pantallas. El juego real **renderiza desde ~10s**; el recomp emite **cero geometría**.
+
+- [x] Traza de semáforos en `swordOfEtheriaSyscallStub`: **descartado** el semáforo 3 / hilo 2 (thread de comandos SIF del SDK, idle por diseño); detectado bug latente: **`0x4d3fe8–0x4d4078` sin recompilar** (cuerpo del hilo 2).
+- [x] Corrida de 10 min del build actual: **sin avance** (`gif=2`, `gsw=0`, `vif=6`, VRAM solo alpha) ⇒ el gate está **aguas arriba del render**.
+- [x] A/B con PCSX2 (2.8.2 + BIOS `ps2-0220e-20060210.bin`): capturada la referencia (diálogo de formato / título / menú principal) y verificado que el juego renderiza (microVU1 + shaders GL) desde ~10s.
+- [x] Descartado el pad como gate: el recomp nunca llama `scePadRead` (solo `scePadInit`+`scePadPortOpen`).
+- [x] Diff de la secuencia de init (cargas CD, IRX, binds SIF/RPC) PCSX2 vs recomp para ubicar la divergencia (2026-10-07: la divergencia fue **módulos IOP en HLE** y luego, aguas abajo, el **motor de DMA**).
+- [x] Reparar carga física de `PADMAN` (2026-10-08): **los 11 IRX cargan físicos por `cdrom0`** (SIO2MAN/PADMAN/SIO2D/DBCMAN/MC2_D/CDVDSTM/LIBSD/SDRDRV/LIBSMF2/SDSTR3/SD_CALL), cero HLE.
+- [ ] Hito: título + menú principal visibles en el recomp (cierra L60).
+
+## Fase 4.9 — Motor de DMA: alineación y camino al render (2026-10-08)
+
+> Plan aprobado: `~/.commandcode/plans/llegar-al-menu-visual.md`. Estado: el motor
+> de DMA está **trazado de punta a punta** y **se comporta igual que la consola**;
+> faltan (a) el eslabón **comandos→píxeles** y (b) el **fix real** del corrimiento
+> `+0x180` (hoy parcheado con `SWORD_MOTOR_PAD`). Imagen visible: **0%**.
+
+- [x] Trazar el motor de DMA: handler `0x6e4068`, ring `0xA96800` (`[tag][addr]` de 16 B), allocator `jalr *(0xA988C0)`, `set-base` `0x6e6d00`, init `0x51f450`.
+- [x] A/B por **savestates de PCSX2** (8 fases) + `game/rdram_diff.py`: la divergencia nace en el **init del motor** (slot 1 negro → slot 2 formato) con un corrimiento **`+0x150`/`+0x180`**.
+- [x] Con `SWORD_MOTOR_PAD` el **ring/head/tail y los buffers coinciden** con la consola y los comandos son **idénticos** (`00001101 00A96880`).
+- [x] Descartar el **kick GIF** (`0x6e47e4`) como gate: la consola también lo salta (`*(gp+0x3C0)=0`).
+
+### 4.9.1 — Acelerar el ciclo de iteración
+- [x] **Procedimiento**: editar/instrumentar **sólo `work/generated/FUN_006cba48_0x6cba48_p2.cpp`** (la copia viva; verificado con los tags `[GEN-B*]`). Las otras 3 copias ya quedaron con inserciones inertes (**NO tocar**) ⇒ sólo se recompila `p2`.
+- [ ] Consolidar atajos/instrumentación en **un `env` por experimento** + helper `fprintf` compartido.
+
+### 4.9.2 — Ruta real del render (eslabón faltante) [CERRADO]
+- [x] El pipeline **VIF1 → VU1 → XGKICK → GS** está **vivo**: `[vu1:mscal] endPc=0x168 stopD=0 stopT=0`, `[gs:gif] nreg=3 ctx0fbp=128`, `[UNPACK]` carga 192 vecs a VU1 data, `[MPG]` carga 376 B.
+- [x] VRAM (savestate): la consola **sí renderiza** (`b2=64670`, `b3=31773` px con RGB) en **FBP `0x100`/`0x180`**; el recomp **cero** (`b0..b3=0`, sólo clear alpha).
+- [x] **Descartado**: el kick GIF (`0x6e47e4`) — la consola también lo salta.
+
+### 4.9.3 — Fix real del corrimiento `+0x180` [PENDIENTE — EL FIX]
+**Causa raíz (unificada)**: un **corrimiento `+0x150`/`+0x180`** al arranque. Evidencia:
+- BASE (`gp-0x7A28`): real `0xA95FA0` vs recomp `0xA95E50` (`+0x150`); `inicio` (`gp-0x7A34`): `0xA96000` vs `0xA95E80`.
+- Con `SWORD_MOTOR_PAD=1` el **ring/head/tail coinciden** (`0xA96800`) y los comandos son **idénticos** ⇒ el motor se alinea.
+- **PERO el microcódigo VU1 sigue mal**: recomp `102e07f0` vs real `f303ff0187102200` (**30 apariciones en el ELF** ⇒ es el micro del juego).
+- Sin pad: **0 MPG / 0 mscal** (el VU1 no arranca) ⇒ el pad es **necesario pero insuficiente**.
+- **Descartado/falso**: `jalr *(0xA988C4)` **no es un allocator** — `0xA988C0/C4` tienen **magnitudes tipo float** (`0x43C00000`=384.0f) y valen **0** en las fases tempranas del real.
+- **Pendiente**: encontrar **de dónde sale la BASE** (`sw $v0,0x85D8($gp)` en `0x6e6684`) — ahí se fija el `+0x150`. Instrumentar ese punto (copia viva) y comparar el `v0` real (sólo se tiene del recomp: `0xA95E50`).
+
+### 4.9.4 — A/B del GS (VRAM) [CERRADO]
+- [x] Conteo por bloque de VRAM en el recomp (`[gsblk]`): **cero px con RGB** en toda la VRAM. Consola: 96k.
+
+### 4.9.5 — Limpieza (al cerrar el hito)
+- [ ] Revertir los triages/atajos **activos** y dejar sólo fixes reales:
+  `SWORD_MOTOR_PAD` (generado p2), `SWORD_FIX_SHIFT` (generado p2), `SWORD_HEAP_PAD`,
+  `SWORD_FORCE_3C0`, `SWORD_CB_PRODUCER`, `SWORD_RDRAM_DUMP`, `[wp-A988C0]`, `[gsblk]`,
+  `[regs]`, `[MPF/UNPACK]` (`std::cerr`), y los `fprintf [GEN]/[CHAIN]/[H]/[H2]` **en las 3 copias no-vivas**.
+- [ ] `design.md` **§11**: arquitectura del camino del render confirmada.
+
+### Estado al cierre del 2026-10-08 (para retomar)
+- **58 commits** pusheados; ~95 entradas en `decisions.md`; `design.md` §10/§10.1.
+- **Herramientas listas**: A/B con savestates de PCSX2 (`~/.config/PCSX2/sstates/*.p2s` = ZIP con
+  `eeMemory.bin`, **`GS.bin`**, `Screenshot.png`, `PCSX2 Internal Structures.dat` con `cpuRegs`
+  a **16 B/GPR** y base de GPR en `blob[0x162]`), `game/rdram_diff.py`, y watchpoints en el runtime.
+- **Los 8 savestates del arranque** (negro → menú) siguen en `~/.config/PCSX2/sstates/`.
+- **El runtime modificado NO está versionado** (`tools/` está en `.gitignore`): los cambios
+  viven en `tools/PS2Recomp/ps2xRuntime/src/lib/{ps2_runtime.cpp, Kernel/Syscalls/System.cpp,
+  ps2_vif1_interpreter.cpp}` + `work/generated/FUN_006cba48_0x6cba48_p2.cpp`. **Regenerar los
+  parches** en `game/patches/upstream/` antes de considerar el cambio reproducible (audit A1).
+
 ## Herramientas de debug (2026-10-05)
 
 - [x] `game/smoke_report.py`: corre el binario con timeout y resume tick/gif/VRAM, modo audio (polls vs transfers), spin `0x6e4d98`, unhandled imports, triages y causa de salida con veredicto (verificado 2026-10-05: corrida 30s → TRANSFER correcto)

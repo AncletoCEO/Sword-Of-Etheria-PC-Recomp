@@ -1,0 +1,458 @@
+diff --git a/ps2xRuntime/src/lib/Kernel/Syscalls/System.cpp b/ps2xRuntime/src/lib/Kernel/Syscalls/System.cpp
+index 9614016..1c940e6 100644
+--- a/ps2xRuntime/src/lib/Kernel/Syscalls/System.cpp
++++ b/ps2xRuntime/src/lib/Kernel/Syscalls/System.cpp
+@@ -542,6 +542,14 @@ namespace ps2_syscalls
+ 
+         const uint32_t heapBase = (heapBaseRaw + 0xFu) & ~0xFu;
+ 
++        // ATAJO 2026-10-08: el heap del juego arranca ~0x180 mas abajo que en la
++        // consola (A/B con savestates), asi que el motor de DMA apunta a buffers
++        // corridos. SWORD_HEAP_PAD=N desplaza el heap base N bytes para compensar.
++        static const uint32_t s_heapPad = []() -> uint32_t {
++            const char *e = std::getenv("SWORD_HEAP_PAD");
++            return e ? static_cast<uint32_t>(std::strtoul(e, nullptr, 0)) : 0u;
++        }();
++
+         // Silent Hill and other games often pass -1 (0xFFFFFFFF) to mean "rest of RAM".
+         static constexpr uint32_t kDefaultGuestHeapEnd = 0x01F00000u;
+         uint32_t heapLimit = kDefaultGuestHeapEnd;
+@@ -559,18 +567,12 @@ namespace ps2_syscalls
+ 
+         if (runtime)
+         {
+-            runtime->configureGuestHeap(heapBase, heapLimit);
+-
++            runtime->configureGuestHeap(heapBase + s_heapPad, heapLimit);
+             PS2_IF_AGRESSIVE_LOGS({
+-                std::cerr << "[SetupHeap]"
+-                          << " base=0x" << std::hex << heapBaseRaw
+-                          << " alignedBase=0x" << heapBase
+-                          << " size=0x" << heapSize
+-                          << " runtimeBase=0x" << runtime->guestHeapBase()
+-                          << " runtimeEnd=0x" << runtime->guestHeapEnd()
++                std::cerr << "[SetupHeap] base=0x" << std::hex << heapBase
++                          << " pad=0x" << s_heapPad << " -> 0x" << (heapBase + s_heapPad)
+                           << std::dec << std::endl;
+             });
+-
+             setReturnU32(ctx, runtime->guestHeapBase());
+             return;
+         }
+diff --git a/ps2xRuntime/src/lib/ps2_runtime.cpp b/ps2xRuntime/src/lib/ps2_runtime.cpp
+index 45cb9d2..728670c 100644
+--- a/ps2xRuntime/src/lib/ps2_runtime.cpp
++++ b/ps2xRuntime/src/lib/ps2_runtime.cpp
+@@ -682,6 +682,24 @@ bool PS2Runtime::syncCoreSubsystems()
+                                      m_vu1.execute(m_memory.getVU1Code(), PS2_VU1_CODE_SIZE,
+                                                    m_memory.getVU1Data(), PS2_VU1_DATA_SIZE,
+                                                    m_gs, &m_memory, startPC, top, itop, 65536);
++                                     // TRIAGE 2026-10-08: ¿el juego corre VU1?
++                                     // ¿y DESDE DÓNDE (pc/ra del EE)?
++                                     {
++                                         static uint64_t s_mscal = 0;
++                                         ++s_mscal;
++                                         if (s_mscal <= 60ull || (s_mscal % 500ull) == 0ull) {
++                                             const uint32_t eePc = cpuContext->pc;
++                                             const uint32_t eeRa = static_cast<uint32_t>(_mm_cvtsi128_si32(cpuContext->r[31]));
++                                             RUNTIME_LOG("[vu1:mscal] n=" << s_mscal
++                                                         << " startPc=0x" << std::hex << startPC << std::dec
++                                                         << " endPc=0x" << std::hex << m_vu1.state().pc << std::dec
++                                                         << " cycles=" << m_vu1.state().cycles
++                                                         << " stopD=" << (m_vu1.state().stoppedByD ? 1 : 0)
++                                                         << " stopT=" << (m_vu1.state().stoppedByT ? 1 : 0)
++                                                         << " eePc=0x" << std::hex << eePc
++                                                         << " eeRa=0x" << eeRa << std::dec);
++                                         }
++                                     }
+                                      cpuContext->vu0_vpu_stat =
+                                          (cpuContext->vu0_vpu_stat & ~0x0600u) |
+                                          (m_vu1.state().stoppedByD ? 0x0200u : 0u) |
+@@ -700,6 +718,17 @@ bool PS2Runtime::syncCoreSubsystems()
+                                      m_vu1.resume(m_memory.getVU1Code(), PS2_VU1_CODE_SIZE,
+                                                   m_memory.getVU1Data(), PS2_VU1_DATA_SIZE,
+                                                   m_gs, &m_memory, top, itop, 65536);
++                                     {
++                                         static uint64_t s_mscnt = 0;
++                                         ++s_mscnt;
++                                         if (s_mscnt <= 10ull || (s_mscnt % 500ull) == 0ull) {
++                                             RUNTIME_LOG("[vu1:mscnt] n=" << s_mscnt
++                                                         << " endPc=0x" << std::hex << m_vu1.state().pc << std::dec
++                                                         << " cycles=" << m_vu1.state().cycles
++                                                         << " stopD=" << (m_vu1.state().stoppedByD ? 1 : 0)
++                                                         << " stopT=" << (m_vu1.state().stoppedByT ? 1 : 0));
++                                         }
++                                     }
+                                      cpuContext->vu0_vpu_stat =
+                                          (cpuContext->vu0_vpu_stat & ~0x0600u) |
+                                          (m_vu1.state().stoppedByD ? 0x0200u : 0u) |
+@@ -1487,6 +1516,193 @@ void PS2Runtime::drainCompletedDmacHandlers(uint8_t *rdram)
+ {
+     for (uint32_t cause : m_memory.consumeCompletedDmacCauses())
+     {
++        // TRIAGE 2026-10-08: estado de la cola de DMA del motor JUSTO cuando se
++        // despacha su handler (el handler sale si head==tail o f5cf!=0).
++        {
++            static uint64_t s_dmaIrq = 0;
++            ++s_dmaIrq;
++            if (s_dmaIrq <= 40ull || (s_dmaIrq % 500ull) == 0ull)
++            {
++                R5900Context *c = m_eeScheduler ? m_eeScheduler->currentContext() : nullptr;
++                const uint32_t gp = c ? static_cast<uint32_t>(_mm_cvtsi128_si32(c->r[28])) : 0x00A28070u;
++                auto rd32 = [&](uint32_t addr) -> uint32_t {
++                    uint32_t v = 0;
++                    const uint32_t p = addr & 0x01FFFFFFu;
++                    if (p + 4u <= 0x02000000u) std::memcpy(&v, rdram + p, 4);
++                    return v;
++                };
++                auto rd8 = [&](uint32_t addr) -> uint32_t {
++                    const uint32_t p = addr & 0x01FFFFFFu;
++                    return (p < 0x02000000u) ? rdram[p] : 0u;
++                };
++                const uint32_t head = rd32(gp + 0x638u);
++                const uint32_t tail = rd32(gp + 0x63Cu);
++                const uint32_t cb = rd32(gp - 0x7A30u);
++                RUNTIME_LOG("[dmairq] n=" << s_dmaIrq << " cause=" << cause
++                            << " gp=0x" << std::hex << gp
++                            << " head=0x" << head << " tail=0x" << tail << std::dec
++                            << (head == tail ? " EMPTY" : " WORK")
++                            << " f630=" << rd8(gp + 0x630u)
++                            << " f5cf=" << rd8(gp + 0x5CFu)
++                            << " cb=0x" << std::hex << cb << std::dec);
++            }
++        }
++        // ATAJO 2026-10-08: el reset del motor deja f5cf=0, pero algo lo vuelve a
++        // 1 despues (escritores 0x6e44e4/44fc/4644, dentro del handler de DMAC),
++        // y el handler sale por 0x6e40fc (bne f5cf,0 -> epilogo). Forzamos f5cf=0
++        // antes de despachar para ver si el pipeline arranca (SWORD_FORCE_F5CF=1).
++        static const bool s_forzarF5cfCero = []() {
++            const char *e = std::getenv("SWORD_FORCE_F5CF");
++            return e != nullptr && *e == '1';
++        }();
++        if (s_forzarF5cfCero)
++        {
++            R5900Context *c = m_eeScheduler ? m_eeScheduler->currentContext() : nullptr;
++            const uint32_t gp = c ? static_cast<uint32_t>(_mm_cvtsi128_si32(c->r[28])) : 0x00A28070u;
++            const uint32_t p = (gp + 0x5CFu) & 0x01FFFFFFu;
++            if (p < 0x02000000u && rdram[p] != 0u)
++            {
++                static uint64_t s_fz = 0;
++                if (++s_fz <= 10ull || (s_fz % 2000ull) == 0ull)
++                {
++                    RUNTIME_LOG("[f5cf-force] n=" << s_fz << " prev=" << static_cast<uint32_t>(rdram[p]));
++                }
++                rdram[p] = 0u;
++            }
++        }
++        // ATAJO 2026-10-08: el spin 0x6e4d98 llama a cb (gp-0x7A30) cuando head==tail
++        // para PRODUCIR; cb=0 => nunca llena. Experimento: instalar cb = 0x6e4348
++        // (el productor) para que el spin lo invoque (SWORD_CB_PRODUCER=1).
++        static const bool s_cbProducer = []() {
++            const char *e = std::getenv("SWORD_CB_PRODUCER");
++            return e != nullptr && *e == '1';
++        }();
++        if (s_cbProducer)
++        {
++            R5900Context *c = m_eeScheduler ? m_eeScheduler->currentContext() : nullptr;
++            const uint32_t gp = c ? static_cast<uint32_t>(_mm_cvtsi128_si32(c->r[28])) : 0x00A28070u;
++            const uint32_t pc = (gp - 0x7A30u) & 0x01FFFFFFu;
++            if (pc + 4u <= 0x02000000u)
++            {
++                uint32_t cur = 0;
++                std::memcpy(&cur, rdram + pc, 4);
++                if (cur == 0u)
++                {
++                    const uint32_t prod = 0x006e4348u;
++                    std::memcpy(rdram + pc, &prod, 4);
++                    static bool s_logged = false;
++                    if (!s_logged) { s_logged = true; RUNTIME_LOG("[cb-install] cb = 0x6e4348 (productor)"); }
++                }
++            }
++        }
++        // A/B 2026-10-08: volcar el bloque del motor gp+0x5C0..0x650 la PRIMERA vez
++        // que head (gp+0x638) != 0 (i.e. post-init), para comparar 1:1 con PCSX2.
++        {
++            static bool s_dumped = false;
++            R5900Context *c = m_eeScheduler ? m_eeScheduler->currentContext() : nullptr;
++            const uint32_t gp = c ? static_cast<uint32_t>(_mm_cvtsi128_si32(c->r[28])) : 0x00A28070u;
++            uint32_t head = 0;
++            const uint32_t ha = (gp + 0x638u) & 0x01FFFFFFu;
++            if (ha + 4u <= 0x02000000u) std::memcpy(&head, rdram + ha, 4);
++            if (!s_dumped && head != 0u)
++            {
++                s_dumped = true;
++                RUNTIME_LOG("[motor] (primer head!=0) head=" << std::hex << head << std::dec);
++                // A/B 2026-10-08: volcar 512 KB de RDRAM (0x220000..0x2A0000) a un
++                // archivo para diffear contra el savestate de PCSX2.
++                if (const char *dumpPath = std::getenv("SWORD_RDRAM_DUMP"))
++                {
++                    if (FILE *f = std::fopen(dumpPath, "wb"))
++                    {
++                        std::fwrite(rdram + 0x00A20000u, 1u, 0x00080000u, f);
++                        std::fclose(f);
++                        RUNTIME_LOG("[motor] rdram dump -> " << dumpPath);
++                    }
++                }
++                for (uint32_t off = 0x5C0u; off < 0x650u; off += 0x10u)
++                {
++                    char line[256];
++                    int n = std::snprintf(line, sizeof(line), "[motor] gp+%#05x:", off);
++                    for (int i = 0; i < 16; i += 4)
++                    {
++                        uint32_t v = 0;
++                        const uint32_t a = (gp + off + static_cast<uint32_t>(i)) & 0x01FFFFFFu;
++                        if (a + 4u <= 0x02000000u) std::memcpy(&v, rdram + a, 4);
++                        n += std::snprintf(line + n, sizeof(line) - n, " %08x", v);
++                    }
++                    RUNTIME_LOG(line);
++                }
++            }
++        }
++        // ATAJO 2026-10-08: el kick GIF (0x6e47e4) requiere *(v0+0x3C0)!=0 (CHCR).
++        // SWORD_FORCE_3C0=<val> lo fuerza antes del dispatch.
++        static const uint32_t s_force3c0 = []() -> uint32_t {
++            const char *e = std::getenv("SWORD_FORCE_3C0");
++            return e ? static_cast<uint32_t>(std::strtoul(e, nullptr, 0)) : 0u;
++        }();
++        if (s_force3c0 != 0u)
++        {
++            R5900Context *c = m_eeScheduler ? m_eeScheduler->currentContext() : nullptr;
++            const uint32_t gp = c ? static_cast<uint32_t>(_mm_cvtsi128_si32(c->r[28])) : 0x00A28070u;
++            const uint32_t a = (gp + 0x3C0u) & 0x01FFFFFFu;
++            if (a + 4u <= 0x02000000u) std::memcpy(rdram + a, &s_force3c0, 4);
++        }
++        // 4.9.4 (2026-10-08): contar contenido de VRAM por bloque (1 MB) para ver
++        // en que FBP renderiza el recomp (comparar con GS.bin del savestate).
++        {
++            static uint64_t s_gs = 0;
++            if (((++s_gs % 20ull) == 0ull) && m_boundGSVram != nullptr)
++            {
++                char line[256];
++                int n = std::snprintf(line, sizeof(line), "[gsblk]");
++                for (uint32_t b = 0; b < 4u; ++b)
++                {
++                    uint64_t rgb = 0;
++                    const uint8_t *p = m_boundGSVram + b * 0x100000u;
++                    for (uint32_t i = 0; i < 0x100000u; i += 4)
++                    {
++                        uint32_t px = 0;
++                        std::memcpy(&px, p + i, 4);
++                        if ((px & 0x00FFFFFFu) != 0u) ++rgb;
++                    }
++                    n += std::snprintf(line + n, sizeof(line) - n, " b%u=%llu", b, (unsigned long long)rgb);
++                }
++                RUNTIME_LOG(line);
++            }
++        }
++        // A/B de registros (2026-10-08): loguear pc/ra/sp/gp del thread activo para
++        // comparar con el real del savestate (pc=0x6E4CDC ra=0x7FE000 sp=0x1FFDBA0 gp=0xA28070).
++        {
++            static int s_regs = 0;
++            if (++s_regs <= 12)
++            {
++                R5900Context *c = m_eeScheduler ? m_eeScheduler->currentContext() : nullptr;
++                if (c != nullptr)
++                {
++                    RUNTIME_LOG("[regs] #" << s_regs
++                                << " pc=0x" << std::hex << c->pc
++                                << " ra=0x" << static_cast<uint32_t>(_mm_cvtsi128_si32(c->r[31]))
++                                << " sp=0x" << static_cast<uint32_t>(_mm_cvtsi128_si32(c->r[29]))
++                                << " gp=0x" << static_cast<uint32_t>(_mm_cvtsi128_si32(c->r[28]))
++                                << std::dec);
++                }
++            }
++        }
++        // Watchpoint 2026-10-08: detectar cambios de *(0xA988C0) (el puntero del
++        // allocator del motor) y loguear el pc que lo produce.
++        {
++            static uint32_t s_last = 0xFFFFFFFFu;
++            static int s_n = 0;
++            uint32_t v = 0;
++            std::memcpy(&v, rdram + 0x00A988C0u, 4);
++            if (v != s_last && ++s_n <= 15)
++            {
++                R5900Context *c = m_eeScheduler ? m_eeScheduler->currentContext() : nullptr;
++                RUNTIME_LOG("[wp-A988C0] #" << s_n << " v=0x" << std::hex << v
++                            << " pc=0x" << (c != nullptr ? c->pc : 0u) << std::dec);
++                s_last = v;
++            }
++        }
+         ps2_syscalls::dispatchDmacHandlersForCause(rdram, this, cause);
+     }
+ }
+@@ -2081,6 +2297,22 @@ __m128i PS2Runtime::Load128(uint8_t *rdram, R5900Context *ctx, uint32_t vaddr)
+ void PS2Runtime::Store8(uint8_t *rdram, R5900Context *ctx, uint32_t vaddr, uint8_t value)
+ {
+     ps2TraceGuestWrite(rdram, vaddr, 1u, value, 0u, "WRITE8", ctx);
++    // TRIAGE 2026-10-08: watchpoint en gp+0x5CF / gp+0x630 (flags del motor de DMA).
++    {
++        const uint32_t gp = static_cast<uint32_t>(_mm_cvtsi128_si32(ctx->r[28])) & 0x01FFFFFFu;
++        if (vaddr == ((gp + 0x5CFu) & 0x01FFFFFFu) || vaddr == ((gp + 0x630u) & 0x01FFFFFFu))
++        {
++            static uint64_t s_w8 = 0;
++            ++s_w8;
++            if (s_w8 <= 40ull || (s_w8 % 200ull) == 0ull)
++            {
++                RUNTIME_LOG("[wp8] addr=0x" << std::hex << vaddr << " val=" << std::dec
++                            << static_cast<uint32_t>(value) << " pc=0x" << std::hex << ctx->pc
++                            << " ra=0x" << static_cast<uint32_t>(_mm_cvtsi128_si32(ctx->r[31]))
++                            << std::dec << " n=" << s_w8);
++            }
++        }
++    }
+     try
+     {
+         m_memory.write8(vaddr, value);
+@@ -2107,6 +2339,43 @@ void PS2Runtime::Store16(uint8_t *rdram, R5900Context *ctx, uint32_t vaddr, uint
+ void PS2Runtime::Store32(uint8_t *rdram, R5900Context *ctx, uint32_t vaddr, uint32_t value)
+ {
+     ps2TraceGuestWrite(rdram, vaddr, 4u, value, 0u, "WRITE32", ctx);
++    // TRIAGE 2026-10-08: sitio REAL del kick DMA VIF1 (CHCR en 0x10009000,
++    // bit 8 = start) con el pc/ra del EE.
++    if (vaddr == 0x10009000u && (value & 0x100u) != 0u)
++    {
++        static uint64_t s_vif1Kick = 0;
++        ++s_vif1Kick;
++        if (s_vif1Kick <= 30ull || (s_vif1Kick % 500ull) == 0ull)
++        {
++            RUNTIME_LOG("[dma:kick] VIF1 CHCR=0x" << std::hex << value
++                        << " pc=0x" << ctx->pc
++                        << " ra=0x" << static_cast<uint32_t>(_mm_cvtsi128_si32(ctx->r[31]))
++                        << std::dec << " n=" << s_vif1Kick);
++        }
++    }
++    // TRIAGE 2026-10-08: watchpoint en gp+0x638/0x63C (head/tail) y gp-0x7A30 (cb).
++    // Se comparan AMBAS formas: relativa al gp del ctx y absoluta (gp=0xA28070).
++    {
++        const uint32_t gpRaw = static_cast<uint32_t>(_mm_cvtsi128_si32(ctx->r[28]));
++        const uint32_t gp = gpRaw & 0x01FFFFFFu;
++        const bool hit =
++            vaddr == ((gp + 0x638u) & 0x01FFFFFFu) || vaddr == ((gp + 0x63Cu) & 0x01FFFFFFu) ||
++            vaddr == ((gpRaw - 0x7A30u) & 0x01FFFFFFu) ||
++            vaddr == 0x00A286A8u || vaddr == 0x00A286ACu || vaddr == 0x00A20640u;
++        if (hit)
++        {
++            static uint64_t s_w32 = 0;
++            ++s_w32;
++            if (s_w32 <= 60ull || (s_w32 % 400ull) == 0ull)
++            {
++                RUNTIME_LOG("[wp32] addr=0x" << std::hex << vaddr << " val=0x" << value
++                            << " pc=0x" << ctx->pc
++                            << " ra=0x" << static_cast<uint32_t>(_mm_cvtsi128_si32(ctx->r[31]))
++                            << " gp=0x" << gpRaw
++                            << std::dec << " n=" << s_w32);
++            }
++        }
++    }
+     try
+     {
+         m_memory.write32(vaddr, value);
+@@ -2265,6 +2534,12 @@ bool PS2Runtime::findEeSyscallOverride(uint32_t syscallNumber, uint32_t &handler
+ 
+ void PS2Runtime::setEeSyscallOverride(uint8_t *rdram, uint32_t syscallNumber, uint32_t handler)
+ {
++    {
++        static int s_n = 0;
++        if (++s_n <= 40)
++            RUNTIME_LOG("[setsyscall] #" << s_n << " n=" << syscallNumber
++                        << " handler=0x" << std::hex << handler << std::dec);
++    }
+     constexpr uint32_t kTableBase = 0x80011F80u & 0x1FFFFFFFu;
+     constexpr uint32_t kMirrorLimit = 0x00080000u;
+     const int64_t offset = static_cast<int64_t>(static_cast<int32_t>(syscallNumber)) * 4;
+@@ -2416,10 +2691,16 @@ void PS2Runtime::run()
+                                                << " gif=" << curGif
+                                                << " gsw=" << curGs
+                                                << " vif=" << curVif
++                                               << " p3Mask=" << (m_memory.isPath3Masked() ? 1 : 0)
++                                               << " p3Fifo=" << m_memory.path3MaskedFifoSize()
+                                                << std::endl);
+ 
+             }
+         });
++        if (m_memory.path3MaskedFifoSize() > 0)
++        {
++            m_memory.flushMaskedPath3Packets(true, true);
++        }
+         uint32_t presentWidth = FB_WIDTH;
+         uint32_t presentHeight = DEFAULT_DISPLAY_HEIGHT;
+         UploadFrame(frameTex, this, presentWidth, presentHeight);
+@@ -2446,6 +2727,35 @@ void PS2Runtime::run()
+         }
+         EndDrawing();
+ 
++        static uint64_t s_screenshotFrame = 0;
++        s_screenshotFrame++;
++        const char *ssDir = std::getenv("PS2_SCREENSHOT_DIR");
++        if (ssDir && *ssDir)
++        {
++            const char *intervalEnv = std::getenv("PS2_SCREENSHOT_INTERVAL");
++            uint64_t interval = intervalEnv ? std::strtoull(intervalEnv, nullptr, 10) : 0;
++            bool shouldCapture = false;
++            if (interval > 0)
++            {
++                shouldCapture = (s_screenshotFrame % interval) == 0;
++            }
++            else
++            {
++                shouldCapture = (s_screenshotFrame == 10 || s_screenshotFrame == 60 ||
++                                 s_screenshotFrame == 180 || s_screenshotFrame == 360 ||
++                                 s_screenshotFrame == 600 || s_screenshotFrame == 900 ||
++                                 s_screenshotFrame == 1200 || s_screenshotFrame == 1500 ||
++                                 s_screenshotFrame == 2000);
++            }
++            if (shouldCapture)
++            {
++                char ssPath[512];
++                std::snprintf(ssPath, sizeof(ssPath), "%s/frame_%04llu.png", ssDir, static_cast<unsigned long long>(s_screenshotFrame));
++                TakeScreenshot(ssPath);
++                std::cout << "[screenshot] saved " << ssPath << std::endl;
++            }
++        }
++
+         if (WindowShouldClose())
+         {
+             RUNTIME_LOG("[run] window close requested, breaking out of loop");
+diff --git a/ps2xRuntime/src/lib/ps2_vif1_interpreter.cpp b/ps2xRuntime/src/lib/ps2_vif1_interpreter.cpp
+index b02c7ca..b224058 100644
+--- a/ps2xRuntime/src/lib/ps2_vif1_interpreter.cpp
++++ b/ps2xRuntime/src/lib/ps2_vif1_interpreter.cpp
+@@ -478,6 +478,23 @@ void PS2Memory::processVIF1Data(const uint8_t *data, uint32_t sizeBytes)
+                 {
+                     std::memcpy(m_vu1Code + destAddr, data + pos, copyBytes);
+                     markVU1CodeModified();
++                    {
++                        static int s_mpg = 0;
++                        if (++s_mpg <= 8)
++                        {
++                            std::cerr << "[MPG] #" << s_mpg << " dest=0x" << std::hex << destAddr
++                                      << " bytes=" << std::dec << copyBytes << " first="
++                                      << std::hex << (copyBytes > 0 ? *reinterpret_cast<const uint32_t*>(data + pos) : 0u)
++                                      << std::dec << std::endl;
++                        }
++                    }
++                }
++                else
++                {
++                    static int s_mpgf = 0;
++                    if (++s_mpgf <= 8)
++                        std::cerr << "[MPG] #" << s_mpgf << " FAIL pos=" << pos << " copyBytes=" << copyBytes
++                                  << " sizeBytes=" << sizeBytes << std::endl;
+                 }
+             }
+             pos += mpgBytes;
+@@ -572,6 +589,14 @@ void PS2Memory::processVIF1Data(const uint8_t *data, uint32_t sizeBytes)
+ 
+             const bool zeroExtend = (imm & 0x4000u) != 0u;
+ 
++            {
++                static int s_unpack = 0;
++                if (++s_unpack <= 20)
++                    std::cerr << "[UNPACK] #" << s_unpack << " opcode=0x" << std::hex << static_cast<unsigned>(opcode)
++                              << " vuAddr=0x" << vuAddr << " bytes=" << std::dec << totalBytes
++                              << " vecs=" << writeVectorCount << std::endl;
++            }
++
+             if (m_vu1Data && totalBytes > 0 && pos + totalBytes <= sizeBytes)
+             {
+                 const uint8_t *srcBase = data + pos;

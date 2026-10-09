@@ -1,0 +1,7 @@
+{
+  "//": "ghidra-mcp y tools/PS2Recomp son clones externos dentro del workspace. Su .git se guarda como .git-off (para que VS Code no los tome como repos y ofrezca pushear ahi). Igual se listan aca como defensa por si se re-clonan.",
+  "git.ignoredRepositories": [
+    "ghidra-mcp",
+    "tools/PS2Recomp"
+  ]
+}

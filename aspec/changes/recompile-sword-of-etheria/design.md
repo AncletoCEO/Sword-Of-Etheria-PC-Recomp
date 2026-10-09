@@ -192,6 +192,121 @@ Ideas aplicables, en orden de coste:
    runtime HLE), no aporta patrón ejecutable: el atasco vive del lado
    feeder/dato, no del consumidor EE.
 
+### 8. Arquitectura de Suspensión y Preemption en Syscalls (`EeScheduler`) (2026-10-07)
+
+- **Problema de excepción C++ vs context.pc**: Los stubs recompiled de syscalls en `ps2_runtime` (`FUN_004d31c0` SleepThread, `FUN_004d31d0` WakeupThread, `FUN_004d32a0` WaitSema, etc.) ejecutan `handleSyscall()` y posteriormente asignan `ctx->pc = jumpTarget;` ($ra). Si el syscall invoca `blockCurrent()` o `transferIfRequested()`, se lanza la excepción `EeDispatcherTransfer{}` para ceder el control al loop del scheduler (`step()`).
+- **Consecuencia previa**: El desenrollado de la pila de C++ abortaba la función recompiled antes de que pudiera asignar `ctx->pc = $ra`. El contexto guardado del hilo retenía el PC del cuerpo del syscall (`0x4d31c0` / `0x4d31d0`). Al reactivarse, el scheduler reanudaba ejecutando nuevamente el syscall desde el inicio, causando un bloqueo infinito de re-invocación.
+- **Regla arquitectónica**: En `blockCurrent()` y `transferIfRequested()`, si el registro de retorno `$ra` (`getRegU32(&self->activeContext(), 31)`) es distinto de cero, debe asignarse inmediatamente `self->activeContext().pc = ra`. Esto emula con precisión la semántica de hardware de la CPU MIPS R5900, donde cualquier hilo suspendido en un syscall reanuda en su dirección de retorno `$ra`.
+
+### 9. Desbloqueo del Render Loop y Presentación (2026-10-07)
+
+- Al reanudarse correctamente Thread 1 y Thread 3, se desbloqueó el despacho SIF RPC (`sceSifCheckStatRpc` / `0x628950` / `0x628980`).
+- Thread 1 alcanzó el bucle principal de renderizado (`0x6d6a6c`), logrando la activación del **Double Buffering Flip a 60 FPS** (`dispfb1` alternando dinámicamente entre `0x1000` y `0x1080`).
+- Por primera vez se escribió contenido gráfico en la memoria de video de GS: **`vramNonZero = 262144 / 4194304` (256 KB)**, con resolución configurada por el motor a 512x512.
+
+### 10.1 Análisis de arriba a abajo (datos del savestate vs recomp) — 2026-10-08
+
+> Pedido del usuario: recorrer **todo** lo que tenemos sin dejar nada afuera.
+
+**Inventario de datos disponibles** (todo del `.p2s`; **no hace falta debugger**):
+
+| artefacto | contenido | ¿analizado? |
+|---|---|---|
+| `eeMemory.bin` | RDRAM 32 MB | ✅ diff vs recomp (`rdram_diff.py`, 8–13 %) |
+| `GS.bin` | VRAM 4 MB + 509 B | ✅ conteo por bloque |
+| `PCSX2 Internal Structures.dat` | `cpuRegs` (GPR, 16 B c/u), `EE-Subsystems`, `vuMicroRegs`, `VIF1dma`, `Gif Unit`, … | ✅ GPR (32) extraídos; ⏳ subsistemas |
+| `vu1Memory/vu1MicroMem.bin` | data + micro del VU1 | ⏳ pendiente |
+| `iopMemory.bin` | RAM del IOP | ⏳ pendiente |
+| `Screenshot.png` | frame real | ✅ referencia visual |
+| dumps/logs del recomp | RDRAM, VRAM, regs, counters | ✅ |
+
+**Resultado firme: el hilo principal del real y el del recomp están en el MISMO loop**
+(el spin `0x6e4d98`, dentro de `0x6e4848`), pero **en puntos distintos**: el real en
+`pc=0x6E4CDC` (tras el `jal 0x6e4848`), el recomp en `0x6E4B14`/`0x6E4468`.
+**Ojo**: `0x6E4CDC` y `0x6E4F08` son el **mismo bloque duplicado** en el binario ⇒ no
+es divergencia de lógica.
+
+**Registros del real (slot 6/7)**: `v0`/`v1`/`s1` apuntan al **ring** (`0xA96800`),
+`s1 = gp+0x5F8`, `a2=3`, `a3=0x44`, `sp=0x1FFDBA0`, `ra=0x6E4CDC`, `gp=0xA28070`.
+⇒ el real está **vivo en el motor** (coincide con que el ring se llena).
+
+**Pendiente (para "no dejar nada afuera")**:
+1. Histograma de `pc` del recomp (¿pasa por `0x6E4CDC`? ¿por cuáles no?).
+2. A/B **GPR por GPR** (loguear los del recomp en el mismo pc).
+3. Barrer `vu1Memory`/`vu1MicroMem`/`iopMemory` del savestate contra el recomp.
+4. Comparar `Screenshot.png` vs la VRAM del recomp por fase.
+
+### 10. A/B con PCSX2 y estado real del bloqueo (2026-10-07)
+
+- **Método (sin BIOS ni emulador en CI: es referencia local)**: PCSX2 2.8.2 +
+  BIOS `ps2-0220e-20060210.bin`, lanzado `-batch -fullscreen -fastboot` con el
+  ISO del repo (usuario pasa el diálogo inicial a mano); capturas con
+  `spectacle` cada 10 s. Config/evidencia en `/tmp/opencode/pcsx2{,b}/`.
+- **Secuencia real del juego**:
+  1. ~20 s — **primera pantalla**: diálogo **"Select video format — NTSC(60Hz)
+     / PAL(50Hz)"**, dibujado por el juego, esperando input (Cross).
+  2. ~70 s — **título**: logo *THE SWORD OF ETHERIA* sobre nubes +
+     **New Game / Load Game**.
+  3. ~120 s+ — **menú principal**: logo + arte de los 3 personajes +
+     **Quit Game / Save / Story Mode / ?????? / ??????**, ©2006 KONAMI.
+- **El juego renderiza desde el arranque**: el log muestra `microVU1: Cached
+  Prog` + `GL: Compiling vertex/pixel shader` desde ~10 s (VU1 + GS activos).
+- **Estado del recomp (mismo ISO, mismo ELF)**: arranca, carga todo el disco
+  (OL/CHARA/BG/EFFECT/INTER/EED..EEU.BIN) y presenta con double-buffer
+  (`dispfb1` alternando), pero **`gif=2` / `gsw=0` / `vif=6`**: **cero
+  geometría**, VRAM con un único clear alpha (`crt1 fbp=128: rgbNZ=0
+  aNZ=262144`). 10 min sin avanzar ⇒ **diverge antes del primer render**, o
+  sea el gate es temprano (no un state machine profundo).
+- **Hipótesis descartadas (2026-10-07)**:
+  - **Semáforo 3 / hilo 2**: `_init_sys` → `FUN_004d4078` crea el semáforo (id
+    3) + el hilo 2 (entry `0x4d3fa0`); los que lo señalan son
+    `FUN_004d4168/4200/4280` (`iSignalSema`) y **nunca se invocan** ⇒ es el
+    **thread de comandos SIF** del SDK, **idle por diseño** (nuestro HLE de
+    `sceSifCallRpc` puentéa el camino SIF del SDK). No es el gate.
+  - **Pad**: la primera pantalla pide input, pero el recomp **nunca llama
+    `scePadRead`** (solo `scePadInit`+`scePadPortOpen`) ⇒ no está esperando
+    input.
+- **Gap abierto**: `PADMAN`/`SIO2MAN`/`SIO2D`/`DBCMAN` cargan como **HLE**
+  ("physical IRX unavailable") aunque los `.IRX` están extraídos en
+  `work/elf/IOP/`; solo `LIBSD`/`SDRDRV`/`SDSTR3`/`SD_CALL`/`CDVDSTM`/`MC2_D`
+  cargan físicos. PCSX2 sí completa el intercambio de config del pad.
+- **Plan inmediato**: (1) diff de la secuencia de init (cargas CD, IRX, binds
+  SIF/RPC) PCSX2 vs recomp para ubicar la divergencia; (2) reparar la carga
+  física de `PADMAN`.
+
+### 11. Estado del bloqueo y plan del fix (2026-10-08, cierre de sesión)
+
+**El diagnóstico quedó unificado en UNA causa**: un **corrimiento `+0x150`/`+0x180`**
+en los punteros del juego al arranque. Evidencia dura:
+- BASE (`gp-0x7A28`): real `0xA95FA0` vs recomp `0xA95E50`; `inicio` (`gp-0x7A34`):
+  `0xA96000` vs `0xA95E80`.
+- Con `SWORD_MOTOR_PAD=1` el **ring `0xA96800` y los comandos coinciden** con la
+  consola (idénticos) ⇒ el motor queda alineado.
+- **Pero el microcódigo VU1 sigue mal** (`102e07f0` vs `f303ff0187102200`, este último
+  **30× en el ELF** = es del juego) ⇒ el VU1 no procesa geometría ⇒ **VRAM sin RGB**.
+- Sin pad: **0 MPG / 0 mscal** ⇒ el pad es **necesario pero insuficiente** (hay **más
+  de un puntero** afectado, no sólo `s0`).
+
+**Falsos hilos descartados** (no volver a ellos): `jalr *(0xA988C4)` NO es un
+allocator (`0xA988C0/C4` son **floats/handles**, valen `0` en las fases tempranas);
+kick GIF (`0x6e47e4`) lo salta también la consola; `cb`/`f5cf`/pad/CD/IOP/audio/IRQ.
+
+**Plan del fix (Fase 4.9.3)**:
+1. Instrumentar **`0x6e6684`** (`sw $v0,0x85D8($gp)`) en la copia viva y volcar `v0`
+   **junto con el estado del heap** ⇒ de dónde sale `0xA95E50`.
+2. Comparar el **bloque `gp-0x7A28..0x650` slot 1 (negro) → slot 2 (formato) → recomp**
+   para ver qué se inicializa exactamente en ese salto.
+3. Alinear el **micro VU1** (mismo origen) y verificar `[MPG] first == f303ff01`.
+
+**Herramientas y referencias** (todo listo para retomar):
+- Los **8 savestates** del arranque en `~/.config/PCSX2/sstates/*.p2s` (ZIP con
+  `eeMemory.bin`, `GS.bin`, `Screenshot.png`, `PCSX2 Internal Structures.dat` con
+  `cpuRegs` a **16 B/GPR**, base de GPR en `blob[0x162]`).
+- `game/rdram_diff.py` + `SWORD_RDRAM_DUMP` (el recomp volca 512 KB desde `0xA20000`).
+- **Watchpoint** de punteros del motor en `ps2_runtime.cpp` (drain de DMAC).
+- **`runtime-diff-2026-10-08.patch`**: los cambios del runtime de esta sesión
+  (versionados, porque `tools/` está en `.gitignore`).
+
 ## Validation
 
 - **Fase 0**: `git --version`, `cmake --version` (>= 3.20), `cl` (MSVC C++20)
