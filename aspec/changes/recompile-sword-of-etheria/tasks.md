@@ -112,25 +112,43 @@
 - [x] Descartar el **kick GIF** (`0x6e47e4`) como gate: la consola también lo salta (`*(gp+0x3C0)=0`).
 
 ### 4.9.1 — Acelerar el ciclo de iteración
-- [x] **Procedimiento**: editar/instrumentar **sólo `work/generated/FUN_006cba48_0x6cba48_p2.cpp`** (la copia viva; verificado con los tags `[GEN-B*]`). Las otras 3 copias ya quedaron con inserciones inertes (bajo `env` OFF) y **no se vuelven a tocar** ⇒ sólo se recompila `p2` (~2-3 min en vez de ~8).
+- [x] **Procedimiento**: editar/instrumentar **sólo `work/generated/FUN_006cba48_0x6cba48_p2.cpp`** (la copia viva; verificado con los tags `[GEN-B*]`). Las otras 3 copias ya quedaron con inserciones inertes (**NO tocar**) ⇒ sólo se recompila `p2`.
 - [ ] Consolidar atajos/instrumentación en **un `env` por experimento** + helper `fprintf` compartido.
 
-### 4.9.2 — Ruta real del render (eslabón faltante)
-- [ ] Instrumentar `vertexKick`/`submitGifPacket` (con `SWORD_MOTOR_PAD=1`) para ver **quién emite los `[gs:kick]`** (XGKICK/VU1 vs DMA directo).
-- [ ] Leer la **VRAM del savestate** (`GS.bin`) y comparar cuánto dibuja la consola en la fase del formato.
-- [ ] Hipótesis: el render va por **VU1/XGKICK** y el recomp casi no arranca el VU1 (3 MSCAL/60 s).
+### 4.9.2 — Ruta real del render (eslabón faltante) [CERRADO]
+- [x] El pipeline **VIF1 → VU1 → XGKICK → GS** está **vivo**: `[vu1:mscal] endPc=0x168 stopD=0 stopT=0`, `[gs:gif] nreg=3 ctx0fbp=128`, `[UNPACK]` carga 192 vecs a VU1 data, `[MPG]` carga 376 B.
+- [x] VRAM (savestate): la consola **sí renderiza** (`b2=64670`, `b3=31773` px con RGB) en **FBP `0x100`/`0x180`**; el recomp **cero** (`b0..b3=0`, sólo clear alpha).
+- [x] **Descartado**: el kick GIF (`0x6e47e4`) — la consola también lo salta.
 
-### 4.9.3 — Fix real del corrimiento `+0x180` (reemplazar el parche)
-- [ ] A/B del bloque `gp-0x7A28..0x650`: **slot 1 (negro) vs slot 2 (formato) vs recomp**.
-- [ ] Breakpoint en PCSX2 (`0x6e6678` / `0x51f468`) **tras `Reset`** (así está puesto antes de que corra).
-- [ ] Sustituir `SWORD_MOTOR_PAD` por el fix (heap/allocator correcto).
+### 4.9.3 — Fix real del corrimiento `+0x180` [PENDIENTE — EL FIX]
+**Causa raíz (unificada)**: un **corrimiento `+0x150`/`+0x180`** al arranque. Evidencia:
+- BASE (`gp-0x7A28`): real `0xA95FA0` vs recomp `0xA95E50` (`+0x150`); `inicio` (`gp-0x7A34`): `0xA96000` vs `0xA95E80`.
+- Con `SWORD_MOTOR_PAD=1` el **ring/head/tail coinciden** (`0xA96800`) y los comandos son **idénticos** ⇒ el motor se alinea.
+- **PERO el microcódigo VU1 sigue mal**: recomp `102e07f0` vs real `f303ff0187102200` (**30 apariciones en el ELF** ⇒ es el micro del juego).
+- Sin pad: **0 MPG / 0 mscal** (el VU1 no arranca) ⇒ el pad es **necesario pero insuficiente**.
+- **Descartado/falso**: `jalr *(0xA988C4)` **no es un allocator** — `0xA988C0/C4` tienen **magnitudes tipo float** (`0x43C00000`=384.0f) y valen **0** en las fases tempranas del real.
+- **Pendiente**: encontrar **de dónde sale la BASE** (`sw $v0,0x85D8($gp)` en `0x6e6684`) — ahí se fija el `+0x150`. Instrumentar ese punto (copia viva) y comparar el `v0` real (sólo se tiene del recomp: `0xA95E50`).
 
-### 4.9.4 — A/B del GS (VRAM) si el render sigue sin aparecer
-- [ ] Volcar la VRAM del recomp y comparar con `GS.bin`: contar `rgbNZ` y verificar FBP/ventana.
+### 4.9.4 — A/B del GS (VRAM) [CERRADO]
+- [x] Conteo por bloque de VRAM en el recomp (`[gsblk]`): **cero px con RGB** en toda la VRAM. Consola: 96k.
 
-### 4.9.5 — Limpieza (cierre del hito)
-- [ ] Revertir los **5 triages/atajos** (`SWORD_MOTOR_PAD`, `SWORD_HEAP_PAD`, `SWORD_FORCE_3C0`, `SWORD_CB_PRODUCER`, `SWORD_RDRAM_DUMP`) y dejar sólo lo que sea fix real.
+### 4.9.5 — Limpieza (al cerrar el hito)
+- [ ] Revertir los triages/atajos **activos** y dejar sólo fixes reales:
+  `SWORD_MOTOR_PAD` (generado p2), `SWORD_FIX_SHIFT` (generado p2), `SWORD_HEAP_PAD`,
+  `SWORD_FORCE_3C0`, `SWORD_CB_PRODUCER`, `SWORD_RDRAM_DUMP`, `[wp-A988C0]`, `[gsblk]`,
+  `[regs]`, `[MPF/UNPACK]` (`std::cerr`), y los `fprintf [GEN]/[CHAIN]/[H]/[H2]` **en las 3 copias no-vivas**.
 - [ ] `design.md` **§11**: arquitectura del camino del render confirmada.
+
+### Estado al cierre del 2026-10-08 (para retomar)
+- **58 commits** pusheados; ~95 entradas en `decisions.md`; `design.md` §10/§10.1.
+- **Herramientas listas**: A/B con savestates de PCSX2 (`~/.config/PCSX2/sstates/*.p2s` = ZIP con
+  `eeMemory.bin`, **`GS.bin`**, `Screenshot.png`, `PCSX2 Internal Structures.dat` con `cpuRegs`
+  a **16 B/GPR** y base de GPR en `blob[0x162]`), `game/rdram_diff.py`, y watchpoints en el runtime.
+- **Los 8 savestates del arranque** (negro → menú) siguen en `~/.config/PCSX2/sstates/`.
+- **El runtime modificado NO está versionado** (`tools/` está en `.gitignore`): los cambios
+  viven en `tools/PS2Recomp/ps2xRuntime/src/lib/{ps2_runtime.cpp, Kernel/Syscalls/System.cpp,
+  ps2_vif1_interpreter.cpp}` + `work/generated/FUN_006cba48_0x6cba48_p2.cpp`. **Regenerar los
+  parches** en `game/patches/upstream/` antes de considerar el cambio reproducible (audit A1).
 
 ## Herramientas de debug (2026-10-05)
 

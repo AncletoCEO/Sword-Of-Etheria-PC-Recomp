@@ -274,6 +274,39 @@ es divergencia de lógica.
   SIF/RPC) PCSX2 vs recomp para ubicar la divergencia; (2) reparar la carga
   física de `PADMAN`.
 
+### 11. Estado del bloqueo y plan del fix (2026-10-08, cierre de sesión)
+
+**El diagnóstico quedó unificado en UNA causa**: un **corrimiento `+0x150`/`+0x180`**
+en los punteros del juego al arranque. Evidencia dura:
+- BASE (`gp-0x7A28`): real `0xA95FA0` vs recomp `0xA95E50`; `inicio` (`gp-0x7A34`):
+  `0xA96000` vs `0xA95E80`.
+- Con `SWORD_MOTOR_PAD=1` el **ring `0xA96800` y los comandos coinciden** con la
+  consola (idénticos) ⇒ el motor queda alineado.
+- **Pero el microcódigo VU1 sigue mal** (`102e07f0` vs `f303ff0187102200`, este último
+  **30× en el ELF** = es del juego) ⇒ el VU1 no procesa geometría ⇒ **VRAM sin RGB**.
+- Sin pad: **0 MPG / 0 mscal** ⇒ el pad es **necesario pero insuficiente** (hay **más
+  de un puntero** afectado, no sólo `s0`).
+
+**Falsos hilos descartados** (no volver a ellos): `jalr *(0xA988C4)` NO es un
+allocator (`0xA988C0/C4` son **floats/handles**, valen `0` en las fases tempranas);
+kick GIF (`0x6e47e4`) lo salta también la consola; `cb`/`f5cf`/pad/CD/IOP/audio/IRQ.
+
+**Plan del fix (Fase 4.9.3)**:
+1. Instrumentar **`0x6e6684`** (`sw $v0,0x85D8($gp)`) en la copia viva y volcar `v0`
+   **junto con el estado del heap** ⇒ de dónde sale `0xA95E50`.
+2. Comparar el **bloque `gp-0x7A28..0x650` slot 1 (negro) → slot 2 (formato) → recomp**
+   para ver qué se inicializa exactamente en ese salto.
+3. Alinear el **micro VU1** (mismo origen) y verificar `[MPG] first == f303ff01`.
+
+**Herramientas y referencias** (todo listo para retomar):
+- Los **8 savestates** del arranque en `~/.config/PCSX2/sstates/*.p2s` (ZIP con
+  `eeMemory.bin`, `GS.bin`, `Screenshot.png`, `PCSX2 Internal Structures.dat` con
+  `cpuRegs` a **16 B/GPR**, base de GPR en `blob[0x162]`).
+- `game/rdram_diff.py` + `SWORD_RDRAM_DUMP` (el recomp volca 512 KB desde `0xA20000`).
+- **Watchpoint** de punteros del motor en `ps2_runtime.cpp` (drain de DMAC).
+- **`runtime-diff-2026-10-08.patch`**: los cambios del runtime de esta sesión
+  (versionados, porque `tools/` está en `.gitignore`).
+
 ## Validation
 
 - **Fase 0**: `git --version`, `cmake --version` (>= 3.20), `cl` (MSVC C++20)
