@@ -1639,3 +1639,15 @@ A6.** Ninguna acción de esta sección se ejecutó.
   produce ese loop** (refuerza el cuadro: color 0 / Datos).
 - **Próximo**: A/B de **registros/estado** (no sólo el pc) entre el real (del blob)
   y el recomp, en la misma fase — para ver el campo exacto que difiere.
+
+### 2026-10-08 — Registros del real extraídos del savestate (A/B directo posible)
+- Alrededor del `gp` en `cpuRegs` (blob del slot 7 = newgame):
+  ```
+  gp = 0x00A28070
+  sp = 0x01FFDBA0     <- NO es el 0x1FEE000 del CRT0 (es el sp vivo del hilo)
+  pc = 0x006E4CDC     <- el spin
+  ra = 0x007FE000     <- quien llama al spin
+  ```
+- ⇒ **Ya hay A/B de registros posible sin debugger**: loguear los GPR del recomp
+  (en el drain) y comparar contra estos valores del real.
+- El `ra = 0x7FE000` es nuevo y concreto: el spin del **real** se invoca desde ahí.
