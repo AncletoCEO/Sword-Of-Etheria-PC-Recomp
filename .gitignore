@@ -10,8 +10,9 @@ tools/
 out/
 out-linux/
 
-# Clones externos / desorden local (no versionar)
-ghidra-mcp/
+# Clones externos / desorden local (no versionar). Sin barra final: `ghidra-mcp` y
+# `tools/PS2Recomp` quedaron como symlinks a /home/lubonch/repos/_external/.
+ghidra-mcp
 mc0/
 mc1/
 
