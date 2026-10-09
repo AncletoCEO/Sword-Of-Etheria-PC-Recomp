@@ -1770,3 +1770,21 @@ A6.** Ninguna acción de esta sección se ejecutó.
 - **Próximo**: capturar el **pc exacto** del store ⇒ requiere interceptar el
   **fast-write** (el macro del generado; recompila todo, costoso) o barrer la
   **zona `0x6e5900..0x6e5d00`** en busca del `sw` calculado a `0xA988C0`.
+
+### 2026-10-08 — Corrección: `0xA988C0/C4` NO son punteros (son handles/floats) — cae el hilo del jalr
+- Barrido de `0x6e5900..0x6e5d00` + los 4 sitios del "handle": el `0x1000000F` se
+  guarda en **`gp+0x668`** (`sw $v1,0x668($gp)` en `0x70df10`/`0x711ab8`/`0x75c800`).
+  **y `gp+0x668` = `1` en real y recomp** (coincide ✓).
+- **A/B de `0xA988C0`/`C4`** (real vs recomp):
+  ```
+  real:   slot1=0, slot2=0, slot3=0x3F009A34, slot4=0x3F004000,
+          slot5=0x43C00000, slot6=0x3F600000, slot7=0x45000000, slot8=0x1000000F
+  recomp: 0x43400000 / 0x432E0000
+  ```
+  Son **magnitudes tipo float/ID** (`0x3F800000`=1.0f, `0x43C00000`=384.0f, `0x45000000`=2048.0f)
+  ⇒ **no son punteros a función**; y en las fases tempranas del **real valen `0`** ⇒ el
+  `jalr *(0xA988C4)` va a **0** y **el kernel lo intercepta** (handler de syscall/excepción).
+- ⇒ **el hilo "el jalr del allocator va a basura" es un FALSO PROBLEMA** (el jalr no es
+  un allocator): ese `0x6e6640` no asigna memoria. **Corregido.**
+- **Lo que queda firme del corrimiento**: la BASE `0xA95FA0` (consola) vs `0xA95E50`
+  (recomp) y el **microcódigo VU1** equivocado — esas dos sí son divergencias reales.
