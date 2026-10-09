@@ -1741,3 +1741,15 @@ A6.** Ninguna acción de esta sección se ejecutó.
   ⇒ **`0x6e58b8` es la funcion clave** que precede al "handle" `0x1000000F`.
 - **Próximo (a)**: desensamblar `0x6e58b8` (y su relación con `0xA988C0`) para
   encontrar la **primera asignación** y por qué reparte `0x180` menos.
+
+### 2026-10-08 — (a): `SetSyscall` existe pero el escritor de `0xA988C0` no aparece
+- El runtime **sí implementa `SetSyscall`** (`System.cpp:462`) y escribe la tabla de
+  syscall handlers en **`0x80011F80 + n*4`** (no en `0x100000xx`).
+- **No existe ningún `sw` literal a `0xA988C0`** en el ELF (sólo el falso positivo
+  `0x73c8c0` con base `gp`). ⇒ el puntero se puebla con un **store calculado** (base
+  en registro) o **desde el kernel**.
+- **Estado**: el mecanismo de `0x1000000F` (los "handles") **no es el syscall-handler
+  table** (esa está en `0x80011F80`); probablemente es el **mecanismo de
+  `SetSyscallHandler` del EE (exception handler)** al ejecutar en región MMIO.
+- **Queda para retomar**: buscar el `sw` calculado (o instrumentar el recomp para
+  loguear **quién escribe `0xA988C0`**, con watchpoint en el runtime).
