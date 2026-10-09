@@ -1651,3 +1651,18 @@ A6.** Ninguna acción de esta sección se ejecutó.
 - ⇒ **Ya hay A/B de registros posible sin debugger**: loguear los GPR del recomp
   (en el drain) y comparar contra estos valores del real.
 - El `ra = 0x7FE000` es nuevo y concreto: el spin del **real** se invoca desde ahí.
+
+### 2026-10-08 — Análisis de registros del real (A/B): método y cuidado con los falsos positivos
+- **Tabla (8 fases)**: el hilo principal del real está en **todas** las fases (2..8) en
+  `pc=0x006E4CDC`, `ra=0x007FE000`, `sp=0x01FFDBA0`, `gp=0x00A28070` (slot 1 negro:
+  `pc=0x004d3764`).
+- **Cuidado (falso positivo)**: `0x6E4CDC` (real) y `0x6E4F08` (el `ra` del recomp son
+  **el MISMO bloque duplicado**: ambos `jal 0x6e4848` (¡el handler/spin!) y siguen con
+  `lw $v0,0x5ec($gp)`. ⇒ **no es divergencia de lógica**, es código duplicado en el
+  binario. Y el `ra=0x7FE000` puede ser un falso positivo de la heurística de offset
+  (por eso hace falta validarla).
+- **Lo que SÍ es firme**: el pc del real (`0x6E4CDC`) llama a **`0x6e4848`** — o sea
+  **el spin/handler `0x6e4d98` vive dentro de `0x6e4848`**.
+- **Pendiente (análisis de arriba a abajo pedido por el usuario)**: validar el offset
+  de registros en el blob; comparar **GPR por GPR**; y barrer el resto de artefactos
+  (no sólo pc/ra/sp).
