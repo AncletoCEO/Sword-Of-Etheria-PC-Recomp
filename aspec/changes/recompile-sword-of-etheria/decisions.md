@@ -1788,3 +1788,17 @@ A6.** Ninguna acción de esta sección se ejecutó.
   un allocator): ese `0x6e6640` no asigna memoria. **Corregido.**
 - **Lo que queda firme del corrimiento**: la BASE `0xA95FA0` (consola) vs `0xA95E50`
   (recomp) y el **microcódigo VU1** equivocado — esas dos sí son divergencias reales.
+
+### 2026-10-08 — SetSyscall: handlers registrados por el juego
+- `initializeEeKernelState` escribe los handlers en la tabla **`0x80011F80 + n*4`**
+  (RDRAM, "mirror"); `setEeSyscallOverride` los registra **y** los replica ahí.
+- Handlers que registra el juego (traza):
+  ```
+  n=90  handler=0x4ddab0        -> handler real (código del juego)
+  n=91  handler=0x80076000      -> puntero a RDRAM
+  n=252,253,254,255,300,8 -> 0xffffffff (invalidados)
+  ```
+- ⇒ el **syscall 0** (al que apuntaría el `jalr *(0xA988C4)` cuando vale `0`) **no
+  está registrado** ⇒ el `jalr 0` no tiene handler obvio.
+- **Estado**: el mecanismo de handlers existe y funciona; falta determinar **cuál
+  devuelve la BASE (`0xA95FA0`)** / de dónde sale el `+0x150`.
