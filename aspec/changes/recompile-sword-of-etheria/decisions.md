@@ -1679,3 +1679,18 @@ A6.** Ninguna acción de esta sección se ejecutó.
   paquetes sin color/geometría real ⇒ **VRAM sin RGB** (encaja con el `RGBAQ=0`).
 - **Próximo**: instrumentar el **UNPACK a VU1 data** en el VIF1 interpreter (¿el
   recomp lo hace?) y comparar el micro/data del real contra el recomp en la misma fase.
+
+### 2026-10-08 — 🎯 El microcódigo VU1 del recomp es 1 MPG de 376 B; el real tiene 16 KB
+- El recomp **SÍ hace UNPACK a `m_vu1Data`** (`[UNPACK] #2 vuAddr=0x0 bytes=3072
+  vecs=192`) ⇒ **la geometría se carga** (corrige la hipótesis previa).
+- **Pero** sólo se cargan **1 MPG (376 B)** de microcódigo y hay **3 MSCAL / 11
+  UNPACK** en 35 s ⇒ el VU1 **no procesa** los 192 vectores (termina en 771 ciclos).
+- **Real**: `vu1MicroMem` = **2048 words (16 KB)**, empieza `f303ff0187102200…`;
+  el recomp empieza `102e07f0` ⇒ **microcódigo incompleto y/o distinto**.
+- **Hipótesis (la más fuerte hasta ahora)**: el recomp **no carga el microcódigo VU1
+  completo** (1 MPG de 376 B vs 16 KB) ⇒ el VU1 no rasteriza la geometría ⇒ **VRAM
+  sin RGB**. Posible causa: **corrimiento** (`+0x180`) ⇒ el juego lee el microcódigo
+  de la dirección equivocada, o el DMA/VIF1 se corta tras el 1er MPG.
+- **Próximo**: ver **por qué** sólo llega 1 MPG (¿DMA a VIF1 truncado? ¿dirección
+  corrida?) y comparar el microcódigo del real (`f303ff01…`) contra el que carga el
+  recomp (`102e07f0`).
