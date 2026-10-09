@@ -1,0 +1,27 @@
+# Regen 2026-10-10: fix del boundary del dispatcher SIF (0x4d3fe8).
+# Basado en config-linux.toml. Salida a work/generated.new (regen incremental,
+# sin pisar work/generated). Ver recompile-plan.md.
+
+[general]
+input = "/home/lubonch/repos/Sword-Of-Etheria-PC-Recomp/work/elf/SLES_537.68"
+output = "/home/lubonch/repos/Sword-Of-Etheria-PC-Recomp/work/generated.new"
+ghidra_output = "/home/lubonch/repos/Sword-Of-Etheria-PC-Recomp/aspec/changes/recompile-sword-of-etheria/ghidra_functions.csv"
+single_file_output = false
+patch_syscalls = false
+patch_cop0 = true
+patch_cache = true
+stubs = [
+]
+# 0x4d3fe8 = dispatcher SIF (loop 0x4d3fe8..0x4d4078) que el mapa de Ghidra dejó
+# fuera de FUN_004d3fa0. El CSV ya está corregido (End=0x004D4078); esto es
+# cinturón y tirantes por si el discovery lo necesita como entry standalone.
+entry_points = ["0x4d3fe8"]
+skip = []
+
+# Bloqueante #1 (2026-10-02): redirigir el spin del bootstrap EE 0x4c008c al
+# arranque real del juego en 0x4c0218 (thunk_FUN_004dda18).
+[patches]
+instructions = [
+    { address = 0x4c008c, value = 0x08130086 }
+]
+# 0x08130086 = j 0x4c0218
