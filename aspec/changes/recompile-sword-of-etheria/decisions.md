@@ -1710,3 +1710,18 @@ A6.** Ninguna acción de esta sección se ejecutó.
 - **Consecuencia para el fix**: no alcanza con `SWORD_MOTOR_PAD` (alinea el motor
   *tarde*); hay que **corregir el corrimiento en origen** (la asignación del heap/el
   primer `alloc`), que es la **Fase 4.9.3**.
+
+### 2026-10-08 — El pad es necesario pero insuficiente (el micro sale de otro buffer)
+- A/B sin/con `SWORD_MOTOR_PAD`:
+  ```
+  SIN pad : 0 MPG, 0 mscal   <- el VU1 nunca se arranca
+  CON pad : 1 MPG (376 B), 3 mscal, 11 UNPACK
+  ```
+- ⇒ **el pad es imprescindible** (sin él el motor no arranca el VU1) pero **corrige
+  sólo una parte**: el **microcódigo sigue viniendo de un buffer corrido** (empieza
+  `102e07f0` en vez de `f303ff01…`).
+- ⇒ **hay más de un puntero afectado por el corrimiento**: el pad arregla `s0`
+  (inicio/ring) pero **no los buffers internos del motor** (`gp+0x5E0`, `0x608`,
+  `0x610`, `0x614`, …), de donde sale el micro/la geometría.
+- **Consecuencia**: el fix completo es (a) **corregir el corrimiento en origen**, o
+  (b) compensar **todos** los punteros del motor, no sólo `s0`.
