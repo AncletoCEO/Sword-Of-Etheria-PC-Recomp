@@ -1694,3 +1694,19 @@ A6.** Ninguna acción de esta sección se ejecutó.
 - **Próximo**: ver **por qué** sólo llega 1 MPG (¿DMA a VIF1 truncado? ¿dirección
   corrida?) y comparar el microcódigo del real (`f303ff01…`) contra el que carga el
   recomp (`102e07f0`).
+
+### 2026-10-08 — 🎯🎯 El microcódigo VU1 que carga el recomp NO es el del juego
+- Comparación contra el ELF:
+  | bytes | apariciones en el ELF |
+  |---|---|
+  | `0x102E07F0` (1er word que carga el recomp) | 2 |
+  | `f303ff0187102200` (≥8 B del micro del **real**) | **30** ⇒ **es un microcódigo del juego** |
+- ⇒ El recomp **carga un microcódigo que no es el del juego**, y como el micro se
+  envía por **VIF1 desde un buffer del juego**, significa que **el recomp lee el
+  buffer del micro desde la dirección equivocada** ⇒ **el corrimiento (`+0x180`)**.
+- **Todo converge al corrimiento**: el mismo desplazamiento que mueve el heap y el
+  motor hace que **el microcódigo VU1 salga mal** ⇒ VU1 no procesa la geometría ⇒
+  **VRAM sin RGB**.
+- **Consecuencia para el fix**: no alcanza con `SWORD_MOTOR_PAD` (alinea el motor
+  *tarde*); hay que **corregir el corrimiento en origen** (la asignación del heap/el
+  primer `alloc`), que es la **Fase 4.9.3**.
