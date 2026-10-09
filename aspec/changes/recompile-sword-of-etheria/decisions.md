@@ -1753,3 +1753,20 @@ A6.** Ninguna acción de esta sección se ejecutó.
   `SetSyscallHandler` del EE (exception handler)** al ejecutar en región MMIO.
 - **Queda para retomar**: buscar el `sw` calculado (o instrumentar el recomp para
   loguear **quién escribe `0xA988C0`**, con watchpoint en el runtime).
+
+### 2026-10-08 — Watchpoint de `0xA988C0`: acota el escritor a la zona del motor
+- Watchpoint en el runtime (detecta cambios de `*(0xA988C0)` en el drain):
+  ```
+  [wp-A988C0] #1 v=0x0         pc=0x4d0818
+  [wp-A988C0] #2 v=0x43400000  pc=0x6e59e4   <- cambia entre n=1 y n=5
+  ```
+- **Cuidado**: el `pc` que loguea es **el del momento del drain**, no el de la
+  escritura (misma limitación que antes) ⇒ `0x6e59e4` NO es necesariamente el
+  escritor (de hecho, `0x6e59e4` es `sw $a0,0x1000D000` = SPR_FROM).
+- Aun así, **acota la ventana**: `0xA988C0` pasa de `0` a **`0x43400000`** dentro de
+  la zona del motor (`0x6e5xxx`), que es donde vive el "handle".
+- **Real**: `0x1000000F`; **recomp**: `0x43400000` ⇒ **el juego calcula ese valor
+  distinto** (o no lo calcula y queda basura).
+- **Próximo**: capturar el **pc exacto** del store ⇒ requiere interceptar el
+  **fast-write** (el macro del generado; recompila todo, costoso) o barrer la
+  **zona `0x6e5900..0x6e5d00`** en busca del `sw` calculado a `0xA988C0`.
