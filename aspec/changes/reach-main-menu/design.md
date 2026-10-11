@@ -1,5 +1,10 @@
 # Design: reach-main-menu
 
+> **ENTRADA VIGENTE: `HANDOFF.md`.** El enfoque de abajo (scene machine / `sema 8` / RPC sin réplica /
+> watchpoint) quedó **superseded**. El enfoque vigente es **trace-forward con PCSX2+PINE** + un
+> **acelerador de control de flujo** (`SWORD_TRACE_BRANCH`) para localizar el primer desvío; el gate actual
+> es un **wait cruzado** de hilos en la fase de carga (`HANDOFF.md` §7–§8).
+
 ## Approach
 
 Diagnóstico dirigido por **traza de runtime instrumentada** + **A/B con el baseline** congelado

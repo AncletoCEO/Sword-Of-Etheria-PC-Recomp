@@ -1,5 +1,10 @@
 # Spec: scene-phase
 
+> **ENTRADA VIGENTE: `HANDOFF.md`.** Los requerimientos de abajo siguen siendo el **hito** (que la escena
+> avance y el menú sea visible), pero las causas hipotetizadas (`sema 8`, RPC sin réplica) quedaron
+> **descartadas**. El bloqueo actual es un **wait cruzado** de hilos en la fase de carga
+> (`HANDOFF.md` §7–§8).
+
 ## ADDED Requirements
 
 ### Requirement: Avance de fase de escena

@@ -1,5 +1,11 @@
 # Proposal: reach-main-menu
 
+> **ENTRADA VIGENTE: `HANDOFF.md`.** Este proposal se conserva, pero sus hipótesis de foco
+> (`sema 8`, state machine de escena, RPC sin réplica, watchpoint) quedaron **superseded**. El gate real
+> (2026-10-09) es un **wait cruzado** en la fase de carga: ver `HANDOFF.md` §7–§8.
+> La afirmación de abajo de que "el juego ejecuta su lógica, no gira en un loop" resultó **incorrecta**: el
+> recomp queda **congelado** en la fase de carga (ver `decisions.md`).
+
 ## Problem
 
 Tras la recompilación (change `recompile-sword-of-etheria`, archivado) el recomp llega
