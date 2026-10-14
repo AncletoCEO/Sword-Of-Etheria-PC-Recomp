@@ -3,6 +3,39 @@
 **Fecha**: 2026-10-09. **Este es el documento de entrada.** Reemplaza a `reanalysis.md` (obsoleto) y
 consolida `decisions.md`. Si algo acá contradice a otro artifact, **vale este**.
 
+> **ACTUALIZACIÓN 2026-10-11 (Parte 2)** (ver `tasks.md` §"Sesión 2026-10-11 (Parte 2)"):
+> 1. **Destrabe de Streaming y Transición de Escena**: se descubrió que el hilo 3 (cargador de streaming
+> `0x628640`) cicla llamando a `0x4CF860` (`sceCdDiskReady`). Al estar `sceCdRead` en HLE, el semáforo
+> interno de libcdvd nunca se señalizaba y retornaba 6 (`SCECdNotReady`) infinitamente, reteniendo
+> `gp+0x58=1`. Al implementar el stub de `sceCdDiskReady` en `game_overrides.cpp` retornando
+> `SCECdComplete = 2`: **el hilo 3 completó el streaming, limpió `gp+0x58=0`, `burst_maxdst` saltó de
+> `0xCE9B60` a `0xDAFE80` (>116k words escritas) y el hilo principal avanzó al loop de escena `0x6D6FE8`**.
+> 2. **Causa del indirect call nulo en loop de escena (`pc=0` en `0x6D2688`)**:
+> `0x6D2688` hace un dispatch de método virtual (`0xA887B8 + 0x10C`) dentro de `0x6D23F0`, la cual es llamada
+> desde `0x742270` (`FUN_00742270`). En `ghidra_functions.csv`, `FUN_00742270` estaba **truncada a sólo 4
+> bytes** (`0x742270..0x742274`), emitiendo solo la reserva de stack y dejando sin ejecutar la inicialización
+> real de la estructura de escena. Se corrigieron los extents de `FUN_00742270` (1432 B) y `FUN_00742808`
+> (1880 B). Próximo paso: terminar regeneración con `ps2_recomp` e integrar.
+>
+> **ACTUALIZACIÓN 2026-10-11**:
+> se implementó un **hook de escritores por `mprotect`** (`SWORD_WP_WRITER`, runtime `.cpp`, default OFF) que
+> captura el PC del que escribe `0xC80000–0xE50000` por `SIGSEGV`, **sin recompilar los 18 311 `.cpp`**.
+> Resultado: **los únicos escritores son el propio juego** (`FUN_006cba48` p10 = armado de escena,
+> `FUN_004eb8d0`) y el **allocador `FUN_004c3000`**; **CERO escritores de DMA/CD/runtime** ⇒ la hipótesis
+> "DMA/staging" queda **refutada**. `0xCF0000–0xE50000` **nunca** se escribe (coincide con
+> `burst_maxdst=0xCE9B60`). El contenido del recomp **alinea con el real en un corrimiento exacto `+0x150`**.
+> **Burst trazado con `src`** (`[burst-loop]`, stub de `memcpy` `0x4C38D8`): el armado son sub-loops que copian
+> de **tablas fuente fijas dentro de la región**; `burst_maxdst` **sube y se estanca** en `0xCE9B60` (~161 s)
+> ⇒ **el loop externo termina** (no es lentitud). Las fuentes divergen (mismo conteo, 0 coincidencias =
+> punteros) y la **última fuente `0xce3a50` está casi vacía en el recomp (25 nz vs 250)**.
+> **CORRECCIÓN DE FASE (clave)**: el dump del recomp coincide con `draw_vif1kick_006E4468` en **98.33 % de
+> todo el RAM** (RAM baja **100 %**; vs `videoformat_menu` 94.26 %) ⇒ **el recomp es FIEL en la fase `draw`**;
+> el "gap de la región" era **diferencia de fase**, no carga faltante. Está **CLAVADO ahí** (600 s:
+> `gp740=0`/`gp744=0`/`burst_maxdst=0xCE9B60` constantes) y **nunca ejecuta el código de la fase menú
+> `0x75Bxxx`**. El bloqueo es la **máquina de estados de escena que no avanza `draw`→`menú`** (el kick de
+> draw sale vacío, `VIF1 qwc=0`). **Próximo**: el trigger de esa transición. El rebuild completo con
+> `ps2TraceGuestWrite` **no agrega** (los escritores ya están enumerados).
+
 > **ACTUALIZACIÓN 2026-10-10** (ver `continue.md` §"Actualización 2026-10-10" y `decisions.md`):
 > el **pipeline gráfico quedó verificado fiel** (incluso contra la consola): el negro es **data del juego**
 > (quads `[0,0,0,255]`). El A/B de RDRAM (recomp vs `.p2s`) da **~93.6 % de páginas idénticas**; la brecha
@@ -47,6 +80,9 @@ siguiente paso. **No es render, no es OS, no es decomp.**
 | `SWORD_TRACE_BRANCH="<lo>-<hi>"` (hex) | **Trace de control de flujo del recomp** con `tid=`, a `/tmp/sword_branch.log`. **Única vía de ver DENTRO de la mega-función** `0x4eb8d0..0x6cba48`. |
 | `SWORD_CHAIN=1` | Probes del retorno de `0x4d19c8`, `0x4d0cd0`, `0x4d3730`, `0x4cee38`, `0x4cfa80`, `0x4cf860`. |
 | `SWORD_RAM_DUMP=1` | Dumps crudos de RDRAM (32 MB ×8) a `/tmp/sword_ram_N.bin`. |
+| `SWORD_WP_WRITER=1` | **Hook de escritores a `0xC80000–0xE50000`** (`mprotect`+`SIGSEGV`): enumera cada rutina que escribe la región (PC del caller + rango), sin rebuild de los `.cpp` generados. |
+| `SWORD_PAD_PRESS=<btn>` (+`SWORD_PAD_TOGGLE=1`) | Pulsa un botón sintético permanente (o 1 s on/off) — harness headless (el pad queda neutro sin teclado). |
+| `SWORD_LOAD_RDRAM=<eeMemory.bin>` (+ `<file>.ranges`) | Teleport de RAM (RDRAM del savestate) al recomp; `SWORD_LOAD_GS=<GS.bin>` inyecta además los 4 MB de **VRAM del GS** (sin esto el estado teleportado queda negro). |
 | `SWORD_SIF_SEMA=1` | Postea sema 3 tras cada RPC (necesario para el hilo 2). |
 | `SWORD_PC_HIST`, `SWORD_FORCE_LOADER`, `SWORD_FIX_4D3740`, `SWORD_IOP_BIOS_RPC`, `SWORD_IOP_SIF_INIT` | Ver §3/§7. |
 | PINE (`/tmp/pine*.py`) | Lee RAM / carga y guarda savestates del **PCSX2** (referencia real). Ver §4. |

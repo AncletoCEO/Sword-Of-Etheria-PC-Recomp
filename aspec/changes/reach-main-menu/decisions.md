@@ -264,11 +264,137 @@ necesita un **trace de ejecución con registros** (herramienta aparte).
 
 ---
 
+## 2026-10-11 — Escritor de `0xC80000+` (hook `mprotect`) — REFUTA el lead "DMA/staging"
+
+- **Hook implementado** (`ps2_memory.cpp`, env `SWORD_WP_WRITER`, default OFF): tras `new uint8_t[ramSize]`
+  se hace `mprotect(PROT_READ)` sobre `0xC80000–0xE50000` y se instala un handler `SIGSEGV`; en el fault se
+  lee `REG_RIP` y se **escanea el stack** por direcciones de retorno dentro del `.text` del binario para
+  identificar al **caller** (el `rip` cae en la copia out-of-line de `Ps2FastWrite32`, compartida). Cada 32
+  faults se re-arma la región RO para **enumerar todos** los escritores (no sólo el primero por página).
+  Sin tocar el header ⇒ **no** recompila los 18 311 `.cpp` (1 archivo + relink).
+- **Resultado (70 sitios de escritura, 200 s)** — simbolizados con `nm`:
+  - `FUN_006cba48` p10/p0/p1/p2/p9 (el **armado de escena**), `FUN_004eb8d0` p3/p7/p16/p21/p22/p35/p40,
+    `FUN_004c3000` (familia **malloc**: lock `0x4C3B50` + smallbins) y `FUN_004c1ee0`.
+  - **Ningún** escritor de DMA, CD, GS, o del runtime. ⇒ El lead "se llena por DMA / staging que falta"
+    es **FALSO**: son stores de puntero calculado del **propio juego**.
+- **Nunca escrito**: `0xCF0000–0xE50000` no lo toca ninguna ruta (páginas en `PROT_READ` todo el run; el
+  marcador `0xDEADBEEF` intacto) ⇒ coherente con `burst_maxdst=0xCE9B60`.
+- **A/B de contenido** (`/tmp/recomp_late3.bin` vs `videoformat_menu.p2s`): el recomp **sí** produce
+  `0xC80000–0xCE9B60` (67 945 words ≠ 0; el real 73 562 en ese rango). Correlación por corrimiento:
+  **máximo exacto en `+0x150`** (6 686 words coincidentes con ambos ≠ 0 vs ≈2 100 en ±0x10 y 2 495 en 0).
+  ⇒ el contenido del recomp es **el del real corrido `0x150`** (el mismo offset de heap ya visto), pero por
+  encima de `0xCE9B60` el recomp no escribe y el real tiene ~270 k words más.
+- **Consecuencia de método**: el rebuild completo con `ps2TraceGuestWrite` **no agrega información** (los
+  escritores ya están enumerados y son guest PCs de las mismas funciones) ⇒ no justifica las horas.
+- **Nota**: las notas previas decían "`0xC80000+` = CERO en el recomp". Con el dump actual el recomp **sí**
+  escribe hasta `0xCE9B60`; el `.02.p2s` de referencia actual tiene esa región en **cero** (los slots se
+  rotaron el 2026-10-10) ⇒ usar `videoformat_menu.p2s` como referencia de fase avanzada.
+
+### Burst del armado (2026-10-11) — secuencia, plateau y fuentes
+
+- **Probe `[burst-loop]` con `src`** (en el stub de `memcpy` `0x4C38D8`, `game_overrides.cpp`): el armado es
+  una **secuencia de sub-loops** `p10 0x74AFD0..0x74B8F8`, cada uno copiando de una **tabla fuente fija**
+  (`src=0xc8db00/0xc81170/0xc80be0/0xc7db20/0xc911c0/0xce3a50…`) a un destino (`dst=0xc8f420…`, `n`, `limit`).
+- **`burst_maxdst` progresa y se estanca**: `0xc8fde0→…→0xcd8530→0xCE9B60`, y se queda en `0xCE9B60` durante
+  ~161 s ⇒ **no es lentitud: el loop termina**. El corte no es un dato ausente sino el fin del recorrido.
+- **Las fuentes divergen** (recomp vs `videoformat_menu.p2s`): `src` con **mismo conteo de no-cero pero 0
+  coincidencias** (firma de *punteros*; coherente con el offset de heap); la **última fuente `0xce3a50` está
+  casi vacía en el recomp (25 nz vs 250)** ⇒ el último batch copia de una tabla sin poblar.
+- **Estado aguas arriba VERIFICADO OK**: `*(gp+0x720)=*(0xA28790)=0x534` **coincide** (es el mismo contador
+  que usa el loop), y el **objeto de escena `0xA887B8`** (incluidos sus **virtuales** `+0x108..+0x11C`:
+  `0x5ea770/0x5ea650/0x5ea400/0x5ea5a0`, y `0x6d5f90/0x6d5fb8`) **coincide 1:1 con el real** (116 nz / 91·128
+  words iguales). ⇒ la divergencia **no** está en este objeto ni en el contador del loop.
+- **`0x55555555`**: el recomp tiene ~19 k words con ese patrón (p.ej. `0xA320EC+`); comparar contra el real.
+
+### FASE del recomp = "draw" (no "menu") — corrige el marco (2026-10-11)
+
+- **Comparar el dump del recomp contra TODOS los savestates del real** (`game/pcsx2_state*` /
+  `videoformat_menu` / `scenebuild_0074A3D4` / `draw_vif1kick_006E4468`), región `0xC80000–0xE50000`:
+  - `draw_vif1kick_006E4468`: nz=**66888** (recomp **67964**), **match@0 = 398 272/409 600 = 97 %**.
+  - `videoformat_menu`: nz=343 002, match@0 = 122 716 (30 %).
+  - `s02`/`ss01`/`menu_sceGsSyncV`: región en **cero**; `scenebuild_0074A3D4`: nz=198.
+- ⇒ **El recomp reproduce FIELMENTE la fase `draw`** (97 %). La "región en cero / gap de DMA" de las notas
+  previas salía de comparar el recomp (fase draw) contra el **menú** (fase posterior). **No es un gap de
+  carga**: es una diferencia de **fase**.
+- **Reencuadre del bloqueo**: el recomp llega al **draw** y se asienta ahí (main thread en loop
+  `0x6e4ebc`/`0x51148c`, `gp58=1`, GS `rgbNZ=0`); el real **avanza del draw al menú**. La pregunta pasa a ser
+  **qué dispara la transición draw→menú**, no "quién escribe `0xC80000+`".
+- **Nota de método**: cualquier A/B de RAM debe hacerse **contra la fase correcta** (`draw` para el recomp);
+  comparar contra `videoformat_menu` induce a error.
+- **Gradiente de la región** (`nz` en `0xC80000–0xE50000`): `ss01`/`s02`/`slice03`/`slice04` = **0** →
+  `scenebuild_0074A3D4` = 198 → `draw_vif1kick_006E4468` = **66 888** → `slice05`/`videoformat_menu` =
+  **343 002**. ⇒ el real **pasa por el `draw` (nz≈67 k) y sigue hasta el menú (343 k)**; el recomp se queda
+  en el `draw`. La construcción de la escena es un **build único grande** entre `slice04` (0) y `slice05`
+  (343 k).
+- **`draw` vs `menu`**: difieren en **sólo 56/512 páginas** de 64 KB. Cambios en el bloque `gp`: `gp+0x58`
+  (`1→0`), `gp+0x74` (`1→0`), `gp+0x80` (`0→0xffffffff`), `gp+0x5cc` (`0x00010000→0x01020000`), `gp+0x5d0`
+  (`0→1`), `gp+0x5e0` (ptr), `gp+0x638/0x63c` (ptrs), y **`gp+0x740` (`0→0x00C68C10`, un puntero al área de
+  escena) + `gp+0x744` (`0→2`)** — candidatos a **estado/fase del menú**.
+
+### El recomp está CLAVADO en la fase `draw` (2026-10-11) — diagnóstico
+
+- **Fidelidad global**: dump del recomp (10 min) vs `draw_vif1kick_006E4468` = **98.33 % de las palabras**
+  idénticas (vs `menu` 94.26 %); **RAM baja = 100 %**. El recomp **reproduce la fase `draw` fielmente**
+  (la "región" sola da 83.8 % vs draw, 25.8 % vs menu, pero el resto del RAM es ~100 %).
+- **Está clavado, no lento**: en 600 s, `burst_maxdst=0xCE9B60`, `gp58=1`, **`gp740=0x0` y `gp744=0x0`
+  constantes**. La transición al menú **nunca ocurre**.
+- **Nunca ejecuta el código de la fase menú `0x75Bxxx`**: traza `SWORD_TRACE_BRANCH` (0 src/tgt en
+  `0x75b000–0x75b400` en 90 s). En cambio el main thread corre el callback `entry_0051147c` → `0x50F750`/
+  `0x50FDD0` y el loop de escena (p10 `0x74B970` recorre una lista llamando los **thunks del objeto de
+  escena** `0x6d5f90`→`0x5ea770` y `0x6d5fb8`→`0x5ea650`, ~18 k veces/90 s).
+- **DRAW VACÍO**: en el estado clavado, el kick de dibujo `[dma:kick] VIF1 CHCR=0x145 madr=0x0 qwc=0x0
+  pc=0x6e4468 ra=0x6e4ebc` → **no transfiere nada** ⇒ pantalla negra coherente (el juego no manda geometría).
+- **RPC sin réplica**: siguen apareciendo `rpc-unhandled` a `sid=0x80000592`/`0x80000006`/`0x8000059c`
+  (×63, `rpc=0`), y `[TYOSD] rpc=0x0 ack done`. (El opt-in `SWORD_IOP_BIOS_RPC` ya se probó sin avance;
+  reverificar sólo si el trigger de fase lo señala.)
+- **Conclusión concreta**: el bloqueo NO es el escritor, ni el DMA, ni el pipeline gráfico — es la
+  **máquina de estados de escena que no avanza de la fase `draw` a la fase `menú`**. Próximo: ubicar el
+  **trigger/condición** de esa transición (el código de `0x75Bxxx` que setea `gp+0x740/0x744`, y qué lo
+  habilita), comparando el estado `draw` con una fase posterior.
+- **Fase menú identificada**: **`FUN_0075b0e0`** (`0x75B0E0`-`0x75B0F8`) es la que setea `gp+0x740` (en
+  `0x75B150/0x75B1CC/0x75B250`). Se invoca **por puntero**: hay una palabra `0x0075B0E0` en los **datos del
+  juego en `0x95F3D4`** (tabla de punteros a funciones). El recomp **nunca** la ejecuta (0 branches en
+  `0x75bxxx`; sin `jal`/dispatch estático) ⇒ la selección de esa entrada (índice/estado) nunca ocurre.
+- **Tabla de fases + descriptor (datos)**: `0x95F3D0`→`0x95F3C0`, `0x95F3D4`→`0x75B0E0`, `0x95F3E0`→`0x75B8F8`
+  (punteros, **idénticos recomp/draw/menu**). Pero el **descriptor `0x95F400+`** está **en cero en `draw` y
+  en el recomp**, y **poblado en `menu`**: `0x95F410: 0→0x101`, `0x95F418: 0→4`, `0x95F424: 0→4`,
+  `0x95F428: 0→0x0095F430`. ⇒ la transición **inicializa ese descriptor**; el recomp nunca llega ahí.
+- **La entrada NO destraba** (2026-10-11): se agregó `SWORD_PAD_PRESS` (pulsa un botón sintético; pad del
+  recomp estaba neutro) y se corrió con `start` toggled 200 s → `gp740=0x0` todo el run, `burst_maxdst`
+  sin cambio. Descarta (al menos start) que la transición dependa de input.
+- **Loop principal del recomp**: `0x51D900–0x51DBFC` (`FUN_0051d900`, ~3.6 it/s) llamando `0x4EA2B8` +
+  el handshake de sema 8 (`WaitSema 0x4D32E0`/`SignalSema 0x4D32C0`). El cargador (hilo 3, `0x628688`) es un
+  handshake con `gp+0x58`: espera `gw+0x58!=0` (SleepThread `0x4D31C0`) → procesa hasta 8 ítems → limpia
+  `gp+0x58`. No es el gate (cicla normalmente).
+- **Recompiler note**: `FUN_006cba48` (`0x6CBA48–0x9CBD34`) y `FUN_004eb8d0` (`0x4EB8D0–0x72B9C8`) son rangos
+  **gigantes** que se tragan datos (`0x95F2xx` es DATA emitida como código: `nop`/`jr $0`/Unhandled SPECIAL)
+  y sub-funciones (`FUN_0075b0e0`, `FUN_0051d900`), que el barrido de la mega-función **ensombrece**.
+
+### Teleport al estado del menú (2026-10-11) — el estado SÍ se alcanza
+
+- **`SWORD_LOAD_RDRAM` (sólo RDRAM) al `videoformat_menu.p2s`**: el juego **entra al estado del menú** —
+  `gp740=0xc68c10` en 114 muestras (antes 0). ⇒ **la máquina de estados puede estar en menú**; lo que no
+  llegaba era el estado (no se alcanzaba por lógica).
+- **Faltaba la VRAM del GS**: se agregó **`SWORD_LOAD_GS=<GS.bin>`** (inyecta los 4 MB de VRAM del savestate
+  en el GS del recomp; el teleport de RDRAM no la incluía). Con RDRAM+VRAM: **`nonZeroRgb` 0 → 1116/262144**
+  y `vramNonZero` 0 → 29544 (primer frame con contenido no-negro), `[gs:diag] crt1 (fbp=0) rgbNZ=1026`.
+- **Pero el menú completo NO se ve** (1116 px = motas sueltas, no una pantalla). La VRAM del real tiene el
+  contenido en **`0x280000`** (fbp≈80) mientras el recomp **presenta `fbp=0`**; probablemente falta teleportar
+  los **registros del GS** (`dispfb`/`display`/`pmode`, en `GS.bin` hdr / `eeHwRegs.bin`) o fijar el fbp de
+  display. Es el siguiente paso concreto para *ver* el menú.
+- Herramientas nuevas: `SWORD_LOAD_GS=<GS.bin>` (VRAM), `SWORD_PAD_PRESS`, `SWORD_WP_WRITER`.
+
 ## Fixes vigentes (default ON, sin regresión)
 
 - **Cluster truncado `0x4d3700–0x4d3770` + `0x4d0cd0`**: corregido en `ghidra_functions.csv` y
   **regenerado**. `FUN_004d0cd0` ahora devuelve **`0x00873C90`** (antes `0x00870000`), con lo que
   `FUN_004d19c8` deja de saltear `FUN_004d3730`. Misma clase que el fix del dispatcher SIF `0x4d3fe8`.
+- **Stub de `sceCdDiskReady` (`0x4cf860`)**: el cuerpo real esperaba un semáforo de libcdvd y RPC
+  `cdvdfsv` que con el HLE de `sceCdRead` nunca llegaba, retornando `6` (`SCECdNotReady`) y trancando
+  al loader thread con `gp+0x58=1`. Stub retorna `SCECdComplete (2)`. Destraba la carga y avanza a `0x6D6FE8`.
+- **Cluster truncado `FUN_00742270` y `FUN_00742808`**: `FUN_00742270` estaba recortada a 4 bytes.
+  Se corrigió el extent a 1432 B (`0x742270..0x742808`) y `FUN_00742808` a 1880 B (`0x742808..0x742F60`).
+  Esto restaura el cuerpo real de armado de datos de escena invocado antes de los virtual dispatches.
 - (`SWORD_IOP_BIOS_RPC`/`SWORD_IOP_SIF_INIT`, opt-in OFF): servidores IOP-BIOS + pre-init de `sifman`.
   Cerraron gaps reales, sin avance de escena.
 

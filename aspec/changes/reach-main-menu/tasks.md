@@ -50,17 +50,64 @@
       dibuja**, no porque el display esté roto. Queda como **harness** (env-gated, default OFF) para
       validar visualmente cualquier avance posterior.
 
-## Pendiente (próxima sesión)
+## Sesión 2026-10-11 — escritor de `0xC80000+` (hook por `mprotect`)
 
-- [ ] **Escritor de `0xC80000+` (lead principal)**: el A/B de RDRAM (recomp vs `.p2s`) da **~93.6 % de páginas
-      idénticas**; la divergencia dominante es **`0xC80000–0xE50000` (~2 MB) = CERO en el recomp** y con data
-      tipo **textura/staging** en el real. No viene de un `sceCdRead` (los 30 reads aterrizan en
-      `0xA4xxxx–0xA8xxxx` y **sí traen data real**) ni de stores literales en `work/generated` ⇒ se llena por
-      **puntero calculado o DMA**. **Próximo**: (a) hook en el path de **DMA** del runtime (1 archivo);
-      (b) dump a **2 ticks** (early vs late) y ver qué páginas de `0xC80000+` cambian alguna vez;
-      (c) rebuild completo activando `ps2TraceGuestWrite` (header de 18 311 .cpp → caro).
-- [ ] **Limpieza**: quitar el probe temporal `[build]` (no env-gated) en
-      `work/generated/FUN_006cba48_0x6cba48_p10.cpp`.
+- [x] **Hook de escritores por `mprotect`** (`SWORD_WP_WRITER`, runtime `.cpp`, default OFF): protege
+      `0xC80000–0xE50000` y captura el PC del escritor vía `SIGSEGV` (sin tocar el header ⇒ sin rebuild de
+      los 18 311 `.cpp`). Con re-armado periódico **enumeró 70 sitios de escritura**.
+- [x] **Escritores identificados: TODOS son código del juego** — mega-funciones `FUN_004eb8d0` y
+      `FUN_006cba48` (p0/p1/p2/p9/**p10** = armado de escena), el **allocador `FUN_004c3000`** (familia
+      `malloc`: toma el lock `0x4C3B50`, chequea smallbins) y `FUN_004c1ee0`. **CERO escritores de DMA / CD
+      / runtime.** ⇒ **la hipótesis "se llena por DMA / staging" queda REFUTADA**: son stores de puntero
+      calculado del juego.
+- [x] **Nunca escrito**: `0xCF0000–0xE50000` (≈270 k words) **no lo escribe ninguna ruta** en 200 s (las
+      páginas quedaron en `PROT_READ`; el marcador `0xDEADBEEF` del seed quedó intacto). Coincide con
+      `burst_maxdst=0xCE9B60`.
+- [x] **Contenido + corrimiento (A/B `SWORD_RDRAM_DUMP_LATE` vs `videoformat_menu.p2s`)**: el recomp **sí**
+      produce `0xC80000–0xCE9B60` (67 945 words ≠ 0; el real 73 562 en ese rango). El contenido del recomp
+      **alinea con el del real en un corrimiento exacto `+0x150`** (spike real: 6 686 words coinciden con
+      ambos ≠ 0, vs ≈2 100 en ±0x10) — el mismo offset de heap ya documentado. Por encima de `0xCE9B60` el
+      recomp no escribe y el real tiene ~270 k words más.
+- [x] **Burst trazado con `src`** (probe `[burst-loop]` en el stub de `memcpy` `0x4C38D8`): el armado es una
+      secuencia de sub-loops, cada uno copiando de una **tabla fuente fija dentro de la misma región**
+      (`src=0xc8db00/0xc80be0/0xc911c0/0xce3a50…`) a un destino (`dst=0xc8f420…`). `burst_maxdst` **sube y
+      se estanca** en `0xCE9B60` durante ~161 s ⇒ **no es lentitud: el loop externo termina**.
+- [x] **Las fuentes divergen**: comparadas recomp vs real, las tablas fuente tienen **mismo conteo de
+      no-cero pero 0 coincidencias** (firma de *punteros*); y la **última fuente `0xce3a50` está casi vacía
+      en el recomp (25 nz vs 250 del real)** ⇒ el último batch copia de una tabla sin poblar.
+- [x] **Fase del recomp = `draw` (corrige el marco)**: el dump del recomp coincide con
+      `draw_vif1kick_006E4468` en **98.33 %** de TODO el RAM (vs `videoformat_menu` 94.26 %; **RAM baja 100 %**);
+      en la región sola, 83.8 % vs draw / 25.8 % vs menu. ⇒ **el recomp es fiel en la fase `draw`**; el "gap
+      de la región" era **diferencia de fase**, no carga faltante.
+- [x] **El recomp está CLAVADO (no lento) en `draw`**: 600 s con `gp740=0x0`/`gp744=0x0`/`burst_maxdst=0xCE9B60`
+      constantes; **nunca ejecuta el código de la fase menú `0x75Bxxx`** (traza `SWORD_TRACE_BRANCH`); corre el
+      loop de escena (thunks `0x6d5f90`→`0x5ea770`, `0x6d5fb8`→`0x5ea650`). El kick de draw sale **vacío**
+      (`VIF1 qwc=0x0`) y quedan RPC `unhandled` (`0x80000592`/`0x80000006`/`0x8000059c`).
+- [x] **Limpieza**: probe temporal `[build]` quitado de `work/generated/FUN_006cba48_0x6cba48_p10.cpp`.
+
+## Sesión 2026-10-11 (Parte 2) — Destrabe de Streaming y Transición de Escena
+
+- [x] **Identificación del gate en loader thread (`0x4cf860` / `sceCdDiskReady`)**:
+      El hilo 3 (cargador CD de streaming `0x628640`) llamaba en loop a `0x4cf860` (`sceCdDiskReady`).
+      El cuerpo real hacía `PollSema` de la libcdvd y RPC a `cdvdfsv` (sid `0x8000059c`). Al estar `sceCdRead`
+      en HLE, ese semáforo nunca se liberaba y `sceCdDiskReady` retornaba `6` (`SCECdNotReady`) infinitamente,
+      dejando al hilo 3 parqueado y `gp+0x58=1`.
+- [x] **Stub de `sceCdDiskReady` aplicado**: En `game_overrides.cpp` se implementó el reemplazo llamando a
+      `ps2_stubs::sceCdDiskReady` (retorna `SCECdComplete = 2`).
+- [x] **Transición verificada y desbloqueo de escena**:
+      Al retornar éxito, el hilo 3 completó el streaming, limpió `gp+0x58=0`, `gp+0x740` avanzó a `0x6D6FE8`,
+      `burst_maxdst` subió de `0xCE9B60` a **`0xDAFE80`** (>116k words escritas) y el hilo 1 avanzó al loop
+      de escena `0x6D6FE8`.
+- [x] **Localización del indirect call nulo (`pc=0x0` en `0x6D2688`)**:
+      El loop de escena invoca `0x6D23F0`, llamada desde `0x742270` (`FUN_00742270`).
+      En `ghidra_functions.csv`, `FUN_00742270` estaba truncada a 4 bytes (`0x742270..0x742274`), emitiendo
+      solamente el `addiu $sp, $sp, -0xe0` y retornando sin ejecutar su cuerpo real ni poblar los campos del
+      objeto de escena (`0xA887B8 + 0x10C` que luego se dispara en `0x6D2688`).
+- [x] **Corrección de extents de funciones 0x742270 y 0x742808**:
+      `FUN_00742270` corregido de 4 bytes a 1432 bytes (`0x742270..0x742808`).
+      `FUN_00742808` corregido de 36 bytes a 1880 bytes (`0x742808..0x742F60`).
+- [ ] **Regeneración e integración del cluster 0x742xxx**:
+      Ejecutar `ps2_recomp`, copiar los archivos corregidos a `work/generated/` y compilar.
 
 ## Cerrado / inválido (no retomar)
 
@@ -72,3 +119,8 @@
   incluso contra la consola. El color negro `[0,0,0,255]` **es data del juego** (quads de fade/clear).
 - **"Falta el color en el VU1/path de RGBAQ"** → **FALSO**: el micro guarda `vf22 = vertex_color × alpha`
   y el `vertex_color` ya viene `[0,0,0,255]` en la data del juego.
+- **"`0xC80000+` se llena por un DMA / una carga de asset que falta"** → **FALSO** (2026-10-11, hook
+  `mprotect`): los únicos escritores son el **propio juego** (`FUN_006cba48` p10, `FUN_004eb8d0`) y el
+  **allocador `FUN_004c3000`**. No hay path de DMA/CD/runtime que escriba esa región.
+- Rebuild completo con `ps2TraceGuestWrite` para "encontrar al escritor" → **innecesario** (el escritor ya
+  está enumerado) y caro (18 311 `.cpp`).
