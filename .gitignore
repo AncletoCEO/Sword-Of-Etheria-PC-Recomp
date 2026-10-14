@@ -48,5 +48,10 @@ ps2_log.txt
 # Renders/capturas del juego (contenido del juego: no versionar)
 frame_*.png
 
+# Capturas de debug de PCSX2 y logs del emulador en la raíz (2026-10-10)
+/*.png
+emulog.txt
+pcsx2 log*.txt
+
 # Nota: NO ignorar a propósito: game/, build_release.py, README.md, .github/
 # para que el release y CI sí se versionen.

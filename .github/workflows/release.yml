@@ -18,16 +18,12 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y cmake ninja-build g++ python3 libgl1-mesa-dev libx11-dev libxcursor-dev libxrandr-dev libxi-dev libxinerama-dev libasound2-dev libpulse-dev
+          sudo apt-get install -y cmake ninja-build g++ python3 libgl1-mesa-dev libx11-dev libxcursor-dev libxrandr-dev libxi-dev libxinerama-dev libasound2-dev libpulse-dev libavcodec-dev libavformat-dev libavutil-dev libswresample-dev libswscale-dev
 
-      - name: Checkout and pin PS2Recomp tools
+      - name: Checkout and pin PS2Recomp tools (fork)
         run: |
-          git clone --recurse-submodules https://github.com/ran-j/PS2Recomp.git tools-ci
-          git -C tools-ci checkout 75d729ce40d7eed9649fd4bb05628dee520f3d0c
-
-      - name: Apply upstream patches
-        run: |
-          python3 game/apply_patches.py --tools tools-ci
+          git clone --recurse-submodules https://github.com/AncletoCEO/Ps2Recomp-of-etheria.git tools-ci
+          git -C tools-ci checkout c74a7eb5bbe21a3ed4081d8f3e22d394b72e6681
 
       - name: Build ps2_recomp and ps2_analyzer
         run: |
@@ -60,21 +56,16 @@ jobs:
       - uses: actions/checkout@v4
       - uses: ilammy/msvc-dev-cmd@v1
 
-      - name: Checkout and pin PS2Recomp tools
+      - name: Checkout and pin PS2Recomp tools (fork)
         run: |
-          git clone --recurse-submodules https://github.com/ran-j/PS2Recomp.git tools-ci
-          git -C tools-ci checkout 75d729ce40d7eed9649fd4bb05628dee520f3d0c
-        shell: pwsh
-
-      - name: Apply upstream patches
-        run: |
-          python game/apply_patches.py --tools tools-ci
+          git clone --recurse-submodules https://github.com/AncletoCEO/Ps2Recomp-of-etheria.git tools-ci
+          git -C tools-ci checkout c74a7eb5bbe21a3ed4081d8f3e22d394b72e6681
         shell: pwsh
 
       - name: Build ps2_recomp and ps2_analyzer
         run: |
-          cmake -S tools-ci -B tools-ci/out -G "Visual Studio 17 2022" -A x64
-          cmake --build tools-ci/out --config Release
+          cmake -S tools-ci -B tools-ci/out -G Ninja -DCMAKE_BUILD_TYPE=Release
+          cmake --build tools-ci/out
         shell: pwsh
 
       - name: Validate scripts and smoke parser

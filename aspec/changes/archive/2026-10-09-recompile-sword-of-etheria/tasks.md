@@ -126,7 +126,7 @@
 - Con `SWORD_MOTOR_PAD=1` el **ring/head/tail coinciden** (`0xA96800`) y los comandos son **idénticos** ⇒ el motor se alinea.
 - **PERO el microcódigo VU1 sigue mal**: recomp `102e07f0` vs real `f303ff0187102200` (**30 apariciones en el ELF** ⇒ es el micro del juego).
 - Sin pad: **0 MPG / 0 mscal** (el VU1 no arranca) ⇒ el pad es **necesario pero insuficiente**.
-- **Descartado/falso**: `jalr *(0xA988C4)` **no es un allocator** — `0xA988C0/C4` tienen **magnitudes tipo float** (`0x43C00000`=384.0f) y valen **0** en las fases tempranas del real.
+- ~~**Descartado/falso**: `jalr *(0xA988C4)` **no es un allocator**~~ **CORREGIDO 2026-10-09**: el slot real del `jalr` es **`0xA888C0`** (no `0xA988C0`; verificado contra el ELF en `0x6e6670`: `0xA90000 - 0x7740`) y **SÍ es un allocator** (`*(0xA888C0)=0x5EA770` en el real → `FUN_005ea790` → … → `FUN_004c3000`). Con el slot correcto, la vía "el allocator devuelve la BASE 0x150 más baja por estado del heap" vuelve a estar **abierta** (detalle en `decisions.md`).
 - **Pendiente**: encontrar **de dónde sale la BASE** (`sw $v0,0x85D8($gp)` en `0x6e6684`) — ahí se fija el `+0x150`. Instrumentar ese punto (copia viva) y comparar el `v0` real (sólo se tiene del recomp: `0xA95E50`).
 
 ### 4.9.4 — A/B del GS (VRAM) [CERRADO]
@@ -149,6 +149,49 @@
   viven en `tools/PS2Recomp/ps2xRuntime/src/lib/{ps2_runtime.cpp, Kernel/Syscalls/System.cpp,
   ps2_vif1_interpreter.cpp}` + `work/generated/FUN_006cba48_0x6cba48_p2.cpp`. **Regenerar los
   parches** en `game/patches/upstream/` antes de considerar el cambio reproducible (audit A1).
+
+## Fase 4.10 — Trazado del render y fidelidad de recompilación (2026-10-09/10)
+
+> Sesión autónoma (30 checkpoints) + continuación. Se **descartaron con evidencia** casi todas las
+> hipótesis previas. Detalle completo en `decisions.md` (2026-10-09 1–16, 2026-10-10 1).
+
+### Hallazgos (hechos)
+- [x] Corregida la dirección del allocator del motor: **`0xA888C0`** (no `0xA988C0`); real `*(0xA888C0)=0x5EA770` → `FUN_005ea790` → … → `FUN_004c3000`.
+- [x] El corrimiento **`+0x150` es del heap completo** (mismo orden/contenido, sólo corrido); alinear el BASE a `0xA95FA0` **no** cambia nada ⇒ **síntoma**.
+- [x] El micro VU1 es **selección de programa por estado** (`set A` @`0x83F190` vs `set B` @`0x8A5A34`); no es corrupción ni corrimiento.
+- [x] El recomp tiene **581 gaps** de código (Ghidra corta funciones; **62** cortes justo tras `syscall`).
+- [x] El scheduler manda a **`pc=0` en silencio** ante un pc sin función (causa del idle dominante).
+- [x] **Fix real `0x4DE480`** (`ei` + epílogo, continuación de `entry_004de478`): el juego loopeaba ahí cada frame. Implementado (`SWORD_FIX_4DE480`, default ON) + verificado `[gap-silent]=0` (45 s y 2 min).
+- [x] `crt0` (`0x4C008C..0x4C0218`) no recompilado y emulado a mano; el init real termina en `ExitThread` (`0x4DDA18` = entry de thread). **`dd958` == `618`** ⇒ no es la causa.
+- [x] `SWORD_MICRO_B` (forzar `set B`) y `SWORD_FORCE_STATE=0` **no** destraban geometría.
+- [x] `libsd:5/6/7` hacen `JumpToGuest` al `LIBSD` real (poll-storm al SPU2); `SWORD_CB_PRODUCER` **rompe** el boot.
+
+### Descartes (con evidencia) — NO volver a ellos
+runtime (VIF1/VU1/XGKICK/GS/present completos), crt0 (`618`==`dd958`), gaps (0 con el fix), micro
+`set B`, forzado de estado, heap `+0x150`, BIOS ausente, RPC/SIF, archivos/IRX, triages de audio.
+
+### Lead 1 — Trazado del render [CERRADO 2026-10-10]
+- [x] El pipeline **renderiza**: VIF1 → VU1 → `XGKICK` (dispara) → GIF (`[gs:gif]`) → `GS::processGIFPacket` → raster (`[gs:prim]`). El juego dibuja **64 sprites negros** (`RGBAQ=0` **por diseño** en su fase actual). Present `dispfb1=0x1000/0x1080`.
+- [x] **El "sin geometría" era FALSO** (`gif=2`/`gsw=0` eran contadores de otro path). **No hay bug de emisión.**
+- **Conclusión**: el juego **no progresa de fase** (estado `2`), por eso sólo dibuja negro.
+
+### Lead 1b — Divergencia de estado (NUEVO, prioritario)
+- [ ] Encontrar quién/por qué el **estado del juego** queda en `2` (real `5`): A/B pc/GPR contra el real en la **misma fase** (el real ya está en el diálogo de formato con px RGB).
+- [ ] **Punto de decisión "¿recompilar?"**: si la causa es una **instrucción mal recompilada** o código faltante ⇒ recién ahí aplica **Lead 3 (regenerar)**.
+
+### Pendiente — Lead 2: gaps (reactivo, sin rebuild)
+- [ ] **Llenar gaps por override** a medida que una corrida más larga los revele (como `0x4DE480`); sin rebuild de horas.
+
+### Pendiente — Lead 3: regenerar el recomp (DIFERIDO, correctitud)
+- [ ] Arreglar límites de función (CSV/linear-sweep) → re-correr `ps2_recomp` → re-split → rebuild.
+- **Veredicto**: **bajo valor para el render actual** (hoy **0 gaps** lo bloquean); inversión de correctitud. No arrancar hasta agotar el Lead 1.
+
+### Instrumentación/triés agregados (gitignored, para retomar)
+`SWORD_FIX_4DE480`, `SWORD_MICRO_B`, `SWORD_FORCE_STATE`, `SWORD_CRT0_INIT={618|da18|dd958}`,
+`SWORD_RDRAM_DUMP_FULL`, `SWORD_RDRAM_DUMP_EARLY`, `SWORD_MOTOR_PAD_V0_OFF`; `[gap-silent]`,
+`[vif1-direct]/[vif1-chain]`, watchpoint `0xA888C0`, `reportMissingFunction` multi-log; overrides
+`0x4D6040/0x4D6064/0x4D6074`, `0x4DE480`, handler de gaps en `EeScheduler.cpp`. Helpers
+`metrics.py`/`diff_full.py` en el scratchpad. **Regenerar parches** (`game/patches/upstream/`) al cierre.
 
 ## Herramientas de debug (2026-10-05)
 

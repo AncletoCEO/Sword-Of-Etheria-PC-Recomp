@@ -307,6 +307,32 @@ kick GIF (`0x6e47e4`) lo salta también la consola; `cb`/`f5cf`/pad/CD/IOP/audio
 - **`runtime-diff-2026-10-08.patch`**: los cambios del runtime de esta sesión
   (versionados, porque `tools/` está en `.gitignore`).
 
+## §12 — Estado 2026-10-10: dónde está el bloqueo del render (tras 30+ checkpoints)
+
+**Resumen**: el bloqueo del render **no** es infraestructura ni arranque. Evidencia (detalle en
+`decisions.md`, entradas 2026-10-09 1–16 y 2026-10-10 1):
+
+- Runtime **completo**: VIF1, VU1 (`XGKICK` implementado), GS, present, double-buffer.
+- El **`crt0`** (`0x4C008C..0x4C0218`) **no está recompilado**; se emula a mano. El init real termina
+  en **`ExitThread`** (es la entry de un thread; `SetupThread` del runtime ignora el entry). La init
+  real (`0x4DD958`) da **lo mismo** que el workaround (`0x4DD618`) ⇒ **no es la causa**.
+- **581 gaps** de recompilación (Ghidra corta funciones; 62 tras `syscall`). El scheduler manda a
+  **`pc=0` en silencio** ante un pc sin función (eso era el idle). **`0x4DE480`** era el único que el
+  juego pegaba → **fix real implementado**. Con el fix, **0 gaps** ⇒ **regenerar el recomp no
+  destrabaría el render hoy**.
+- El corrimiento **`+0x150`** del heap es **síntoma** (alinear el BASE a `0xA95FA0` no cambia nada).
+- El micro VU1 es **selección por estado** (`set A` @`0x83F190` vs `set B` @`0x8A5A34`). Forzar
+  `set B` **no** da geometría.
+- **CORRECCIÓN (2026-10-10)**: el juego **SÍ renderiza**. `XGKICK` dispara; `finishXgkick` submitea
+  paquetes grandes (`totalBytes=2576/1136/336`); `GS::processGIFPacket` procesa los tags; el backend
+  **rasteriza 64 primitivas** (`[gs:prim]`, type=6 sprite). Los `gif=2`/`gsw=0` eran **contadores
+  engañosos** (otro path). ⇒ El bloqueo **NO** es la emisión de geometría, sino **qué se ve**
+  (present/FBP/contenido).
+
+**Conclusión**: la geometría llega y el GS la procesa; falta que **lo dibujado se vea** (comparar el
+`dispfb` presentado vs el `fbp` que dibuja el juego, y el contenido de las primitivas). Plan en
+`tasks.md` → **Fase 4.10** (Lead 1 redefinido).
+
 ## Validation
 
 - **Fase 0**: `git --version`, `cmake --version` (>= 3.20), `cl` (MSVC C++20)

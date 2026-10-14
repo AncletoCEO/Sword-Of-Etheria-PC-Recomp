@@ -1802,3 +1802,648 @@ A6.** Ninguna acción de esta sección se ejecutó.
   está registrado** ⇒ el `jalr 0` no tiene handler obvio.
 - **Estado**: el mecanismo de handlers existe y funciona; falta determinar **cuál
   devuelve la BASE (`0xA95FA0`)** / de dónde sale el `+0x150`.
+
+### 2026-10-09 — 🔴 CORRECCIÓN: el "allocator" del motor está en `0xA888C0`, NO en `0xA988C0`
+- Verificado contra el ELF (`work/elf/SLES_537.68`): en **`0x6e6670`** la instrucción es
+  `0x8C6288C0` = `lw $v0, -0x7740($v1)`, con `v1` cargado en **`0x6e6668`** por
+  `0x3C0300A9` (`lui $v1, 0xA9`). Dirección efectiva = **`0xA90000 - 0x7740 = 0xA888C0`**
+  (offset `0x88C0`, **no** `0x98C0`). El watchpoint previo `[wp-A988C0]` quedó **corrido 0x10000**.
+- **Real (savestates `eeMemory.bin`)**: `*(0xA888C0) = 0x005EA770` en las 7 fases con motor
+  (fase 01 negro: `0`); `*(0xA988C0)` es **basura tipo float** (`0x3F009A34`, `0x43C00000`,
+  `0x45000000`, `0x1000000F`, …) ⇒ confirma que `0xA988C0` era el slot equivocado.
+- ⇒ **CAE el "falso problema"**: el `jalr` del motor **SÍ llama a un allocator real**. Cadena
+  (verificada en `work/generated/`): `0x6e6678 jalr *(0xA888C0)` → `0x5EA770`
+  (`entry_005ea770`, J a `func_5EA790`) → `FUN_005ea790` → `FUN_004c2ad8`
+  (desc. de heap `*(0x871BF0) = 0x00871900`, **dato estático del ELF**: word en `0x871BF0`) →
+  `FUN_004c2b40` → `FUN_004c3000`.
+- **Sigue firme**: la BASE sale de ese allocator (args `a0 = s2 + 0x80`, `a1 = 0x40411`) y
+  difiere **real `0xA95FA0` vs recomp `0xA95E50` (+0x150)**. Con el slot correcto, la vía
+  "el allocator devuelve la BASE más baja por **estado del heap**" vuelve a estar **abierta**
+  (antes se descartó mirando el slot equivocado).
+- **Próximo**: (1) corregir el watchpoint del runtime a **`0xA888C0`**; (2) A/B del descriptor
+  `*(0x871BF0)=0x871900` y de las listas libres entre savestate y recomp; (3) recién entonces,
+  decidir si el `+0x150` nace en `FUN_004c3000` o en una asignación previa que el recomp hace
+  distinto.
+
+### 2026-10-09 — 🎯 Caracterización exacta del `+0x150`: es la **base/estado inicial del heap**, no una asignación faltante
+- **Método**: dump ampliado a `[0x870000, 0xAA0000)` (`SWORD_RDRAM_DUMP`) + A/B 1:1 contra el
+  savestate 02 (`eeMemory.bin`), y watchpoint corregido a `0xA888C0` (hecho).
+- **Resultado**: las **94 asignaciones del motor** en `[0xA90000,0xAA0000)` —mismo orden, mismo
+  contenido byte a byte— están **todas corridas +0x150**; en el heap usado
+  `[0xA93700,0xA96000)` el match sube de 32 % (dx 0) a **91.5 % (dx +0x150)**. ⇒ no falta una
+  asignación: **nace corrida la base/estado inicial del heap**.
+- **Primera divergencia (menor dirección)**: **`0x871940`** (estado del allocator). Real:
+  `[0x40]=0xA93780`, `[0x48]=0xA937A0`, `[0x4C]=0xA93710`; recomp: **0** (no inicializados) —
+  estable entre fases 01 (init, count 0) y 02 ⇒ **es de la init, no del tiempo**. El resto del
+  descriptor `0x871900` (`0xC`, `0x871AE4/3C/94`, `0x9D7DE8`, `1`, `0x4C1C98`) sí coincide.
+- El arena del motor arranca en **`0xA93700`** (= `*(gp-0x90)`, constante hardcodeada en
+  `FUN_005ea320`, = segmento ELF llamado **`heap`**, `filesz=0`), idéntico en real y recomp;
+  lo que difiere es el **estado inicial del allocator dentro del arena**.
+- **Ojo — el micro VU1 NO está corrido 0x150**: real primer micro `f303ff01` @ RDRAM `0x8A5A40`
+  (estático del ELF); recomp `102e07f0` @ ~`0x83F030`. Diferencia **~0x66A10** ⇒ la causa del
+  micro es **otra** (o es una copia a buffer de heap con fuente mal calculada). La hipótesis
+  "causa unificada = el corrimiento" de §11/§4.9.3 queda **en duda**.
+- **Runtime instrumentado (2026-10-09)**: dump ampliado a `[0x870000,0xAA0000)`; watchpoint a
+  `0xA888C0`; `[MPG]` loguea `src` (no sirve para el path FIFO: da basura `0xCA05F660` porque
+  `data` es un buffer local, no `m_rdram+X`). Regenerar parches al cierre.
+- **Próximo**: (a) ubicar la init que escribe `0x871940/48/4C` (candidatos `FUN_004c2838/2900`/
+  `2980`; no es la heap-create obvia) y por qué reparte `0x150` menos; (b) rastrear el **origen
+  real del micro** (`srcPhys`/chain DMA, no el buffer FIFO) para separar el bug del micro del
+  corrimiento.
+
+### 2026-10-09 (2) — 🎯 El micro VU1 es un SÍNTOMA: el juego usa el set A (`0x83Exxx`) y nunca llega al set B (`0x8Axxxx`)
+- **Instrumentado**: `[vif1-chain]` (src/qw/first de cada tag de cadena VIF1) + `[vif1-direct]`.
+- El único `[MPG] #1` sale de una **cadena DMA de VIF1** `src=0x83F190 qw=24`; el blob es
+  `[VIFcode MPG num=47 @0x83F18C][micro @0x83F190]` (`4a2f0000`).
+- El micro del **real** (`f303ff01…`) sale de OTRO blob: `[MPG num=256 @0x8A5A34][micro @0x8A5A40]`
+  (`4a000000`). Ambos son **estáticos del ELF** (presentes en fases 01 y 02).
+- El juego tiene **dos juegos de programas VIF1**: set A (`0x83Exxx`) y set B (`0x8Axxxx`); el set B
+  está referenciado por **tablas estáticas** (`0x8A5080`, `0x8A54A0`: `…008afa80 008a5a30…`), el set A
+  solo aparece en una estructura de heap (`0x9EC5E0`).
+- En **80 s el recomp hace 1 solo MPG (set A)**; nunca sube el set B ⇒ el VU1 corre un micro
+  incompleto (no el del juego) ⇒ **sin geometría**. ⇒ **el micro es SÍNTOMA**: el juego se queda
+  antes del cambio al renderer 3D (set B).
+- **Corrección al punto anterior**: el micro NO está "corrido 0x150"; es una **selección de programa
+  por estado del juego**. Esto **re-fuerza** que el bloqueo es temprano (aguas arriba de la subida del
+  set B), no un bug independiente del VU1. Vuelve a apuntar a (a).
+
+### 2026-10-09 (3) — Barrido de posibilidades (dump temprano, RPC, progreso, hack `fullGame`)
+- **Dump temprano** (count=86 → `/tmp/recomp-early.bin`): el descriptor `0x871900` coincide en
+  **todo** menos `0x871940/48/4C` (**0** en el recomp vs `0xA93780/0xA937A0/0xA93710` en fases
+  01/02). El heap del motor en `0xA93700` tiene `[C]=0x31` (real `0x51`) y **sin los bloques de
+  metadata** (real: nodos `0x20` B en `0xA93760/80/A0`) ⇒ la **init del heap produce un layout
+  distinto**; la base `0xA93700` es idéntica. El escritor de `0x871940/48/4C` **no se pudo ubicar**
+  estáticamente (no hay `sw` a esos offsets desde `*(0x871BF0)`; el allocator es un objeto con
+  callbacks `0x4C1C98→0x4C2788`). El dump temprano dispara en la 1ª IRQ con count ya en 86 (no 0).
+- **RPC**: el juego bindea `sid=0x80000592 / 0x8000059c / 0x80000006` (uno con `"cdrom0:\…"`,
+  fileio) y el runtime ya los **HLE-ea** (recv=0, `v0=0`); el juego lo toma como éxito (`bgezl`).
+  No parece el gate.
+- **Progreso (40 s)**: cargan **todos** los `.BIN` (OL/CHARA/BG/EFFECT/INTER/EED..EEU) y los 11 IRX;
+  **781 FLIP** (double buffer alternando `dispfb1=0x1400/0x1080`); `dma=1018` pero **`gif=2`,
+  `gsw=0`**; canales DMA `ch9(VIF1)=363 ch10(GIF)=2 ch13=635`; `[gs:gif]` 48+ paquetes de 32 B;
+  VU1 con `mscal`/`mscnt` pero **0 XGKICK** ⇒ **sin geometría**. El juego **avanza** (no está
+  deadlockeado: el pc rota), pero **no llega a XGKICK-ear** (micro set A).
+- **Hack grande (contexto)**: `game_overrides.cpp` reasigna **todos** los slots en
+  `[0x4EB8D0,0x6CBA48)` → `fullGameFunc` y `[0x6CBA48,0x9CBD34)` → `fullRenderFunc`
+  (395709 + 18884 slots). El juego corre **dentro de esas dos funciones gigantes**
+  (pc observado `0x51AAE0 ∈ fullGameFunc`). Es un workaround del recompiler, no un bug del juego.
+- **Conclusión del barrido**: **no hay un bloqueante único aislable**. El juego arranca, carga todo,
+  flipea, pero **nunca pasa al renderer 3D (set B)** ⇒ sin XGKICK ⇒ sin geometría. El corrimiento
+  `+0x150` y el micro son **síntomas** del estado temprano, no causas raíz independientes.
+
+### 2026-10-09 (4) — El **estado interno del juego** también diverge (`2` vs `5`), enmascarado por un triage
+- El runtime tiene un triage **siempre activo** en el vivo `work/generated/FUN_006cba48_0x6cba48_p2.cpp`
+  (`0x6e8870`): cuando `byte[*(s2+0x60) + 0x20] & 7 == 2`, lo **fuerza a 5** (`[gen-state] FORCED 2->5`).
+- El código real del juego en `0x6e8870..0x6e8880` chequea `(byte[struct+0x20] & 7) == 5`; el **recomp
+  computa 2**, el real llega a **5**. ⇒ el **estado interno del juego diverge temprano**, igual que el
+  micro (set A) y el heap (`+0x150`).
+- **Síntesis (hipótesis fuerte)**: hay **un único punto de divergencia temprano** (posible instrucción
+  mal recompilada, o una init/alloc faltante) que **cascadea** a los tres síntomas: heap `+0x150`,
+  estado `2≠5`, micro set A. Los triages (`FORCED 2->5`, `SWORD_MOTOR_PAD`, …) los enmascaran parcial.
+- **Consecuencia**: la investigación debe apuntar a **ese punto único** (bisectar el estado temprano
+  contra los savestates 01/02), no a cada síntoma por separado.
+
+### 2026-10-09 (5) — 🔴 El **crt0 real no está recompilado**; el runtime lo emula a mano **y difiere del de la consola**
+- El recompiler **omitió** `0x4C008C..0x4C0218` (**0 refs** en `work/generated`; Ghidra arranca en
+  `0x4C0230`). Ahí vive el **crt0 real** (leído del ELF): limpia FPU, **limpia BSS `[0xA27C80,
+  0xA93700)`**, `syscall 0x3C` (setup de thread: a0=0xA38070, a1=0x1FE0000, a2=0x20000,
+  a3=0xA31D00, t0=0x4C0220), `syscall 0x3D` (`SetupHeap(0xA93700,-1)`), **`jal 0x4DDA18`**,
+  **`jal 0x4D3520`**, `syscall 0x38`, `jal 0x5FEA0`, `j 0x4C1900`.
+- El runtime lo **emula a mano** (`game_overrides.cpp` → `entryContinuation4c008c` @0x4C008C):
+  limpia FPU, limpia BSS, setea `gp=0xA28070`/`sp=0x1FEE000` **fijos**, `SetupHeap(0xA93700,-1)`, y
+  llama **`0x4DD618`** con `ra=0x4C01F0`.
+- **Diferencias con el real**: el emulador **NO** llama `syscall 0x3C` (thread setup), **NO** llama
+  `0x4D3520`, **NO** llama `syscall 0x38`/`0x5FEA0`, y llama **`0x4DD618`** en vez de **`0x4DDA18`**.
+  ⇒ **el init del juego es aproximado, no idéntico al de la consola** ⇒ candidato #1 a la
+  divergencia temprana.
+- `SWORD_HEAP_PAD` desplaza el **retorno** de `SetupHeap` (`-> 0xa93850` con pad `0x150`) pero **NO**
+  mueve el heap del motor (`[GEN] 6e6684-base` sigue `0xA95E50`); la base `0xA93700` está **fija en
+  el código del juego**.
+- **Próximo (fix candidato)**: implementar el crt0 real **completo** en `entryContinuation4c008c`
+  (thread setup 0x3C, `0x4DDA18`, `0x4D3520`, `0x38`, `0x5FEA0`, `j 0x4C1900`) o recompilar el
+  rango; medir si la BASE y el estado (`2` vs `5`) convergen.
+
+### 2026-10-09 (6) — A/B del crt0: el init REAL (`0x4DDA18`) **cuelga** en el recomp; el workaround `0x4DD618` es **necesario**
+- Añadido `SWORD_CRT0_INIT=da18|618` (env) para A/B del target del init del crt0.
+- **`618` (default)**: boot OK → `base=0xA95E50`, `state=5` (forzado), `MPG #1 (set A)`,
+  `flip=1049`, `vram=262144`, `dma=753`.
+- **`da18` (target REAL `0x4DDA18`)**: el juego **se cuelga** en `pc=0x4D6040` (1 thread;
+  `dma=gif=flip=0`). La cadena real `0x4DDA18 → 0x4DD958(→0x4DCDB8)` →
+  `{func_4D3700 (syscall 127 = GetMemorySize = 0x02000000) ? func_4DCDF8 : syscall 130}` →
+  `0x4D2EC0` **no completa** en el recomp.
+- ⇒ La sustitución por `0x4DD618` es un **workaround necesario**, no un capricho: el recomp **no puede
+  correr el init real**. Por eso el init del juego es **aproximado** ⇒ candidato #1 a la divergencia
+  temprana (heap `+0x150`, estado `2≠5`, micro set A).
+- **Diff COMPLETO de RDRAM** (nuevo `SWORD_RDRAM_DUMP_FULL`, 32 MB): vs savestate 01 → **0.8 %**
+  (85 clusters: RAM baja `0x1000-0x1570C` y `0x81E70-0x8FFA0`, allocator `0x871940+`/`0x871C04+`,
+  `0x88Exxx` cada `0x120`); vs 02 → **5.8 %**. ⇒ la divergencia es **amplia**, no sólo el heap.
+- **Extra**: `diff_full.py` + `metrics.py` en el scratchpad para A/B rápido.
+
+### 2026-10-09 (7) — Alinear el BASE a `0xA95FA0` **NO arregla nada** ⇒ `+0x150` es SÍNTOMA (confirmado)
+- `SWORD_MOTOR_PAD_V0` ahora configurable (`SWORD_MOTOR_PAD_V0_OFF`).
+- Con OFF=`0x150`: `[GEN] 6e6684-base=0xA95FA0` — **exacto al real**. Pero **no cambia** el resto:
+  micro sigue **set A** (`102e07f0`), estado forzado a 5, `vram` sólo `262144` (alpha), **0 XGKICK**,
+  `gif=2`.
+- ⇒ **Alinear el corrimiento del heap/base NO destraba el render**: `+0x150` es **síntoma**.
+- (Con `0x180` → base `0xA95FD0`; el real es `0xA95FA0` ⇒ el `0x180` previo **sobre-corregía 0x30**.)
+- **RAM baja `0x0-0x15800`**: en el real tiene los **vectores de excepción + kernel** (BIOS); en el
+  recomp está **en cero** (no hay BIOS; el runtime HLE-ea syscalls). Esperable, pero es una
+  divergencia estructural grande.
+- **`0x88Exxx` (cada `0x120`)**: el recomp va **adelantado** respecto de ss01 (timing), no divergencia de lógica.
+
+### 2026-10-09 (8) — El juego está mayormente **IDLE**; el wait loop es normal; **XGKICK sí está implementado**
+- Histograma de pc (150 s): **`pc=0x0` domina** (10568 muestras) ⇒ el hilo principal está casi siempre
+  **dormido**; la actividad real es `0x4D3FE8` (thread de comandos SIF) y `0x628948` (loop que llama
+  `SleepThread` `0x4D31C0`).
+- El loop `0x628684-0x628948` espera `*(gp+0x58)` (lo setea `entry_00628a00`): es una **espera normal**
+  (el flag vale **0 en real y en recomp**) — no es el bug.
+- **`XGKICK` SÍ está implementado** (`ps2_vu1_lower.cpp:667`, `ps2_vu1_core.cpp:843`). `XGKICK=0` ⇒ el
+  micro **set A** nunca llega a XGKICK-ear (no es un gap del runtime).
+- ⇒ El bloqueo del render es **el estado del juego** (no cambia al micro/estado de render), **no** la
+  infraestructura VU1/GS del runtime (que está completa: VIF1, VU1, XGKICK, GS, present, double-buffer).
+
+### 2026-10-09 (10) — Síntesis de la sesión autónoma (10 checkpoints)
+**Resultado: NO se llegó al menú, pero el problema quedó acotado y varios "sospechosos" quedaron
+descartados con evidencia.**
+
+| Hipótesis | Veredicto |
+|---|---|
+| Infraestructura del runtime (VIF1/VU1/XGKICK/GS/present) incompleta | **Falsa** — está completa; `XGKICK` implementado |
+| El corrimiento `+0x150` es la causa | **Falsa** — alinear el BASE a `0xA95FA0` no cambia nada |
+| Falta una asignación en el heap | **Falsa** — misma secuencia, sólo corrida |
+| El micro VU1 está "corrido 0x150" | **Falsa** — es selección de programa (set A vs B = estado) |
+| El micro es un bug del VU1 | **Falsa** — es síntoma (el juego no cambia al renderer) |
+| Faltan archivos/IRX | **Falsa** — cargan todos |
+| El RPC/SIF es el gate | **Improbable** — HLE-eado, el juego lo toma como éxito |
+| La RAM baja en cero importa | **Poco probable** — es el BIOS (no existe; syscalls HLE) |
+
+**Causa raíz más probable**: el **estado del juego** no converge. Dos orígenes candidatos:
+1. El **crt0 aproximado** (`0x4C008C..0x4C0218` no recompilado; emulado a mano; el init real
+   `0x4DDA18` **cuelga** en el recomp → workaround `0x4DD618`).
+2. Una **instrucción mal recompilada** en el init temprano (cascada a heap/estado/micro).
+
+**Instrumentación/triés agregados en la sesión** (gitignored): `SWORD_CRT0_INIT`, `SWORD_RDRAM_DUMP_FULL`,
+`SWORD_MOTOR_PAD_V0_OFF`, `[vif1-direct]`/`[vif1-chain]`, watchpoint `0xA888C0`, dump temprano.
+Helper scripts (`metrics.py`, `diff_full.py`) en el scratchpad.
+**Pendiente**: regenerar parches (`game/patches/upstream/`) al cierre del change.
+
+### 2026-10-09 (11) — 🎯 CAUSA RAÍZ: el recomp tiene **gaps de código** (Ghidra cortó funciones); el juego cae en ellos y queda idle
+- El scheduler (`EeScheduler.cpp:269`), al topar un `pc` **sin función recompilada**, hace
+  `context.pc = 0` (o duerme el thread). **Eso explica el dominio de `pc=0x0`** en el histograma.
+- `reportMissingFunction` imprime la cadena exacta: `0x4C0008 → 0x4C008C → 0x4DDA18 → 0x4DD958 →
+  0x4D3700 → 0x4DCDF8 → 0x4D6008 → **0x4D6040 (FALTA)**`.
+- `0x4D6040-0x4D6088` es la **continuación de `FUN_004d6008`** (Ghidra la cortó en `0x4D6040`); el
+  recomp no la generó (el `FUN_004d6008` generado termina con `ctx->pc=0x4D6040` y retorna).
+- **Escala**: **581 gaps** de código en `[0x4C0000,0x4EB8D0)` (los grandes: `0x4C0708-0x4C18F0`
+  = 4.5 KB, `0x4C1DD8-0x4C1EE0`, `0x4D6040-0x4D60B8`, …). Distinto del rango `[0x4EB8D0,0x9CBD34)`
+  que el runtime **sí** cubre con la aliasing a `fullGameFunc`/`fullRenderFunc`.
+- **Fix quirúrgico probado** (`game_overrides.cpp`): implementé `0x4D6040/0x4D6064/0x4D6074`
+  (continuación de `FUN_004d6008`) → el init REAL **pasó** `0x4D6040` … pero se clavó en **`0x4D2EC8`**,
+  **otro gap** (fin de `FUN_004d2ec0`). ⇒ es una **cadena** de gaps.
+- ⇒ **El fix general es regenerar el recomp con límites de función correctos** (Ghidra/linear-sweep),
+  no parchear los 581 gaps a mano. **Esta es la causa raíz candidata del bloqueo del render.**
+- **Instrumentación**: `reportMissingFunction` ahora loguea hasta 200 faltantes (antes once-only).
+
+### 2026-10-09 (12) — El init REAL termina en **`ExitThread`**; la init `0x4DD618` del runtime es **OTRA**
+- `0x4D2EC0` (el tail que `0x4DDA18` ejecuta) = `v1=4; syscall` = **syscall 4 = ExitThread** ⇒
+  `0x4DDA18` es la **entry de un thread** que corre la init (`0x4DD958 → 0x4DCDB8 → 0x4DCDF8 →
+  0x4D6008 → 0x4D6040`) y **termina**. Con `SWORD_CRT0_INIT=da18` el runtime lo corre en el hilo
+  **principal** → el hilo termina → se cuelga en `pc=0x4D2EC8`.
+- `SetupThread` (syscall 0x3C) en el runtime fija `gp`/`sp` pero **ignora el entry (`t0=0x4C0220`)**.
+- ⇒ La emulación del crt0 del runtime llama **`0x4DD618`** — una init **DISTINTA** a la real
+  (`0x4DD958`). **Esa es la aproximación que causa la divergencia de estado.**
+- **Patrón sistemático**: **62** funciones terminan en `syscall` y quedan cortadas (el `jr $ra` que
+  sigue no se recompila); **581** gaps en total en `[0x4C0000,0x4EB8D0)`.
+- **Fix quirúrgico probado**: la continuación `0x4D6040/0x4D6064/0x4D6074` de `FUN_004d6008` → el init
+  avanzó ese punto (antes se frenaba ahí).
+- **Handler de gaps en el scheduler**: si el pc faltante es `jr $ra`/`nop`, lo emula (evita el `pc=0`
+  silencioso). El init real igual se frena antes, en el `ExitThread`.
+- **Nuevo A/B**: `SWORD_CRT0_INIT=dd958` corre la init REAL (`0x4DD958`) en vez de `0x4DD618`.
+
+### 2026-10-09 (13) — Resultados NEGATIVOS: ni el crt0, ni los gaps, ni el forzado de estado explican el bloqueo
+- **`dd958` (init real) == `618` (workaround)**: resultado **idéntico** (base `0xA95E50`, estado 5,
+  micro **set A**, `vram=262144`, `0 XGKICK`, `flip≈1080`). ⇒ la init del crt0 **no** es la causa.
+- **0 gaps ejecutados** en el boot (ni `618` ni `dd958`) ⇒ los gaps **no** son el bloqueo actual (sí lo
+  serían si se usara el init real a fondo).
+- **`SWORD_FORCE_STATE=0`** (estado natural `2`): `flip=50`, `vram` hasta **`524288`** (más VRAM), micro
+  set A igual. El forzado cambia el comportamiento (más spin, menos VRAM) pero **no** destraba geometría.
+- ⇒ Descartados como causa del render: **runtime, crt0, gaps, forzado de estado**. Queda la
+  **lógica del juego** (selección del micro **set B**) y/o la **micro VU1** en sí.
+- **Triés nuevos**: `SWORD_FORCE_STATE`, `SWORD_CRT0_INIT=dd958`, y handler de gaps en el scheduler.
+
+### 2026-10-09 (14) — Cierre de la sesión autónoma (20+ checkpoints)
+- **4 min de corrida**: **sin progreso** (`MPG=1` set A, `gif=2`, `gsw=0`, VRAM sólo alpha `262144`,
+  `pc` mayormente `0x0` = idle). 3 threads EE vivos (main + id2 + id3); driver de sonido `libsd:6` en
+  **poll-storm**.
+- **Descartado como causa del render** (con evidencia): runtime (completo), crt0 (`618==dd958`), gaps
+  (0 ejecutados en boot), forzado de estado (cambia spin/VRAM, no geometría), heap `+0x150`, BIOS ausente.
+- **Quedan dos leads**: (1) la **selección del micro set B** — el juego nunca sube el renderer 3D;
+  (2) el **driver de sonido `libsd`** (poll-storm; Fase 4.6 pendiente).
+- **Triés/herramientas dejados**: `SWORD_CRT0_INIT={618|da18|dd958}`, `SWORD_FORCE_STATE`,
+  `SWORD_RDRAM_DUMP_FULL`, `SWORD_MOTOR_PAD_V0_OFF`, handler de gaps en `EeScheduler.cpp`,
+  `reportMissingFunction` multi-log, continuaciones `0x4D6040/64/74`; scripts `metrics.py`/`diff_full.py`.
+- **Build**: compilado y consistente.
+
+### 2026-10-09 (15) — El micro `set B` tampoco destraba; el gate restante es el **AUDIO** (`libsd` HLE `v0=1`)
+- **`SWORD_MICRO_B`** (nuevo): en el handler MPG, si el VU1 recibe el micro `set A` (`0x83F190`), cargo
+  el `set B` (`0x8A5A40`, 2048 B) en su lugar. Resultado: el VU1 corre set B pero **`XGKICK=0` igual**
+  (`mscal` sólo 3, VRAM vacía). ⇒ **el micro tampoco es el bloqueo directo**.
+- **`libsd:5/6/7` están HLE-eados a `v0=1`** en `ps2xIOP/src/emulator/iop_emulator.cpp` (TRIAGE) ⇒ la
+  inicialización de audio **no completa**; el driver (`LIBSD`/`SDRDRV`) polea esperando valores reales
+  (poll-storm de 88k+). Coherente con el **spin del engine loop** (`0x6e4d98`) y el estado "loading"
+  (`2`).
+- ⇒ **El gate restante es el AUDIO (Fase 4.6)**: semántica real de `libsd` desde los exports de
+  `LIBSD.IRX` (reemplazar los `v0=1`), SPU2 mínimo y `SD.BIN`. Dejó de ser un síntoma.
+- **Descartado también**: la selección del micro `set B` (forzarla no da geometría) y el forzado de
+  estado. Quedan: **audio** y (en segundo orden) **regenerar el recomp** con límites correctos.
+
+### 2026-10-09 (16) — Estado final de la sesión autónoma (28 checkpoints)
+- **SPU2 del IOP**: parcialmente modelado (`iop_memory.cpp`: mapa HW, `ENDX`/`STATX` pre-poblados,
+  auto-complete DMA + IRQ). El driver `LIBSD` real **escribe** registros (`0x1F9007C0/7C4/7C8`,
+  `0x1F9006E0/760/788`, `0x1F900788`) — `[triage-spu] write …`.
+- **`libsd:5/6/7`**: el runtime hace `JumpToGuest` al **código real de `LIBSD`** (el `v0=1` es sólo
+  fallback) ⇒ el driver real corre y **polea el SPU2** (poll-storm) ⇒ la init de audio **no completa**.
+- **Gate restante**: SPU2 / semántica `libsd` / `SD.BIN` (**Fase 4.6**). Coherente con el spin del engine
+  loop (`0x6e4d98`) y el estado "loading" (`2`).
+- **Tabla de descartes (toda con evidencia)** en esta sesión: runtime (completo), crt0
+  (`618`==`dd958`), gaps de recomp (0 en boot), micro `set B` (forzarlo no da geometría), forzado de
+  estado, heap `+0x150`, BIOS ausente, RPC/SIF, archivos/IRX.
+- **Leads vivos**: (1) **audio/SPU2 (Fase 4.6)** — el más fuerte; (2) regenerar el recomp con límites
+  de función correctos (581 gaps / 62 cortes por `syscall`).
+
+### 2026-10-10 (1) — 🎯 El juego SÍ pega gaps (silenciosos): `0x4DE480` (`ei`) — **FIX implementado**
+- El scheduler manda a `pc=0` **en silencio** (sin log) cuando el thread tiene invocaciones ⇒ mi
+  chequeo anterior "0 gaps" era sólo del path no-silencioso. **Instrumentado** el path silencioso
+  (`[gap-silent] pc=0x…`).
+- Con eso: el juego (path `618`) pega **`0x4DE480` 200+ veces por corrida** ⇒ **eso** era el idle.
+- `0x4DE480` = `ei`+epílogo (continuación de `entry_004de478`, cortada por Ghidra). **Implementado** como
+  override (`SWORD_FIX_4DE480`, default ON). Verificado: **`gap-silent` = 0** en 45 s y en 2 min.
+- **PERO el render queda igual** (estado forzado 5, micro set A, `gif=2`, sin geometría) ⇒ el gap **no**
+  era el bloqueo del render (aunque es una **mejora real**: el juego loopeaba ahí cada frame).
+- ⇒ Con el fix, el juego corre **sin gaps** (0 silenciosos, 0 reportados en 2 min) y **sigue sin
+  renderizar** ⇒ **la regeneración del recomp NO destrabaría el render actual** (no hay gaps que lo
+  bloqueen). El bloqueo está en la **lógica de render del juego** (que no emite geometría).
+
+### 2026-10-10 (2) — 🔴 CORRECCIÓN MAYOR: el juego **SÍ renderiza** (`XGKICK` + GIF + 64 primitivas); `gif=2/gsw=0` eran **engañosos**
+- **`XGKICK` SÍ dispara** (`[XGKICK] start qw=0xc0/0x2a1`, 16 en 40 s). Mi evidencia previa de "0 XGKICK"
+  era por un **string de log que no existía** ⇒ **falsa**.
+- `finishXgkick` submitea paquetes **grandes** (`[XGKICK-fin] totalBytes=2576/1136/336`, tag PACKED
+  `nloop=3 nreg=3`); `[gs:gif]` los recibe (48).
+- `GS::processGIFPacket` **procesa los tags y escribe registros GS** (`writeRegisterPacked`). El
+  `gsw=0` era **OTRO contador** (writes EE→GS-priv), no el path GIF ⇒ **engañoso**.
+- El backend del GS **rasteriza**: `[gs:prim]` dibuja **64 primitivas** (type=6 sprite, `fbp=128`,
+  `fw=8`) ⇒ **el juego renderiza contenido (sprites 2D)**.
+- ⇒ **CORRECCIÓN a `design.md` §12 / Fase 4.10**: no es "el juego no emite geometría" — **emite y el GS
+  la procesa**. El bloqueo está en **qué se ve** (present/FBP/contenido en blanco), no en la emisión.
+- **Próximo (Lead 1 redefinido)**: comparar el **FBP que se presenta** vs el que dibuja el juego, y el
+  contenido de las primitivas (¿alpha 0? ¿coords fuera de pantalla? ¿textura?).
+
+### 2026-10-10 (3) — Trazado del render: **el pipeline FUNCIONA**; el juego **renderiza negro** (su fase); el bloqueo es el **ESTADO**
+- `[gs:reg]`: el juego escribe **`RGBAQ=0`** (reg `0x1` → value `0x0`) ⇒ todas las primitivas salen
+  **negras por diseño** en su fase actual.
+- El juego configura el GS (`PRIM=6` sprite, `TEX0/TEST/FRAME/XYOFFSET/SCISSOR`) y dibuja **64 sprites
+  negros**; el present es `dispfb1=0x1000/0x1080` (double-buffer). `fbp=128` es FBP `0x100`.
+- ⇒ **El pipeline de render FUNCIONA** (VIF1 → VU1 → `XGKICK` → GIF → `GS::processGIFPacket` →
+  rasteriza). El "sin geometría" era **falso**: el juego dibuja **su fase actual, que es negra**.
+- **El juego NO progresa** a la pantalla de formato (real ss02 tiene px RGB; el recomp sólo negro) ⇒
+  sigue frenado en **estado `2` ("loading")**, nunca llega a `5`.
+- ⇒ **El bloqueo es la transición de estado del juego** (qué "carga" no completa), no el render.
+- **Implicación para el plan**: no hay un bug de emisión que arreglar; hay que **encontrar la divergencia
+  de estado** (A/B pc/GPR contra el real) — y **si es un bug de recompilación, recién ahí** aplica
+  regenerar el recomp. **Este es el punto de decisión "¿recompilar?"**.
+
+### 2026-10-10 (4) — Lead 1b: forzar el estado a 5 **NO avanza** ⇒ el estado no es el bloqueo; el real muestra contenido, el recomp sólo negro
+- Forzar `byte[struct+0x20]=5` (ya lo hacía el triage `FORCED 2->5`) **no** cambia el resultado ⇒ **el
+  estado `2≠5` es SÍNTOMA, no el bloqueo**.
+- **Screenshots del real** (savestate, analizados): ss02/ss03 tienen **contenido** (≈60/192 bloques
+  no-negros; 640×480), ss05 blanco. El recomp dibuja **negro** ⇒ la diferencia es **qué fase dibuja**,
+  no el pipeline (que funciona).
+- `FUN_004c1900` (a donde salta el crt0 como "main") es un **loop sobre una lista del heap**
+  (`*(0x871BF0)+0x148`), **no** el game-loop.
+- ⇒ El juego **no progresa de la fase de boot/negro a la de contenido**, y el estado no lo explica. La
+  causa es **más profunda (juego-adentro)**: un **recurso/loader** que no completa o una **instrucción
+  mal recompilada**.
+- **Decisión**: para distinguir "juego-adentro" de "recompilación" hace falta un **A/B pc/GPR** contra el
+  real en un punto temprano común. Si aparece una **instrucción mal compilada** ⇒ **regenerar (Lead 3)**.
+  Si es lógica/recurso ⇒ seguir juego-adentro (no recompilar).
+
+### 2026-10-10 (5) — A/B de memoria: la divergencia es la **estructura `0xA319xx` (refs a kernel/BIOS)**, NO una instrucción mal recompilada
+- Comparé el dump completo del recomp (32 MB) vs ss01/ss02 en las regiones de globals del juego.
+- **`0xA31944-0xA3196C` diverge**: recomp `0` / `0xA298xx` (heap) vs real **`0x56AF0`** (dirección de
+  **kernel/BIOS**, `< 0x4C0000`) y `0xA28070` (gp) — es una **estructura que referencia código de
+  kernel/BIOS**, que el recomp **no tiene**.
+- El resto de la región gp coincide salvo timing (`0xA280xx`: el recomp va adelantado).
+- ⇒ El A/B **no** muestra una **instrucción mal recompilada**; muestra la **ausencia del BIOS/kernel** (ya
+  conocida) + una estructura del juego que depende de ella.
+- **VEREDICTO**: la evidencia apunta a **juego-adentro / BIOS ausente**, **no** a un bug de traducción ⇒
+  **recompilar NO es el camino** (hoy). El próximo paso es entender la estructura `0xA319xx` (¿tabla de
+  handlers del kernel? ¿la instala el juego o la BIOS?) y qué de ella usa la progresión de fase.
+
+### 2026-10-10 (6) — `0xA319xx` = **tabla de pares (código, gp)**; el recomp la llena con **punteros de heap** (`0xA29880`) vs **`0x56xxx`** del real
+- Contenido (real ss01/ss02): pares `(0x56AF0, 0xA28070=gp)`, `(0x56AAC, …)`, `(0x56BD0, …)`,
+  `(0x56B8C, …)` + contadores (`0x1a`/`0x140`, `0x8`/`0xc`).
+- El recomp tiene **`0xA29880`** (puntero de **heap**) en los mismos slots ⇒ los pares apuntan a **otro
+  lugar** (heap vs `0x56xxx`).
+- `0x56AF0` y vecinos valen **0** en el savestate real ⇒ **no son código** (¿handles? ¿región de un
+  módulo que el juego carga/relocaliza? el ELF tiene `menu.bin`/`prg_player_0.bin` en el seg. 1 @`0x100000`).
+- No hay **ninguna referencia estática** a `0xA319xx` en el código generado ⇒ la llena el juego vía
+  puntero calculado (un **loader/registro**).
+- ⇒ Divergencia de **carga/relocación de módulo/estructura**, **no** de traducción. Candidato a gate de
+  la progresión de fase. Próximo: encontrar el loader y qué consume esa tabla.
+
+### 2026-10-10 (7) — La tabla `0xA31940` la referencia **RAM baja `0x193A0` (kernel)** ⇒ es del **BIOS/kernel**, que el recomp no tiene
+- `*(0x193A0) = 0xA31940` (único puntero a la tabla), y `0x193A0` está en **RAM baja** (kernel/exec).
+- `0x56A00` y `0x100000` (seg. 1 del ELF = `menu.bin`) están **en 0** en el savestate ss02.
+- ⇒ La tabla `0xA319xx` es una **estructura del kernel/BIOS** (referenciada por low-mem), que el recomp
+  **no posee** ⇒ el recomp la llena con basura/heap (`0xA29880`).
+- **Conclusión definitiva**: el gate de progresión depende de **estructuras del kernel/BIOS** ⇒ se
+  resuelve **emulándolas en el runtime** (`game_overrides`/syscalls), **NO recompilando**.
+- **Estado del arte**: **no hay bug de recompilación** que arregle el render; el faltante es **BIOS/
+  kernel** (conocido y estructural).
+
+### 2026-10-10 (8) — La "tabla" `0xA31940` es el **struct cliente de un `sceSifCallRpc`** (`FUN_004e9c30`) — lead accionable (runtime)
+- `FUN_004e9c30` (0x4E9C30): limpia structs (~`0xA319A0`), setea `*(0xA31B80)=0x10`, y llama
+  **`sceSifCallRpc(client=0xA31940, rpcNum=1, mode=0, send=0xA31B80, sendsize=128, recv=0xA31B80,
+  recvsize=128)`**.
+- ⇒ `0xA31940` es el **`sceSifClientData`**, **NO** una tabla de handlers del juego. Sus campos
+  `+0x14/+0x18` valen `(0x56AF0, gp)` en el real (server/buffer del lado IOP) y el recomp los tiene
+  mal (0/heap) porque **el HLE de RPC del runtime no arma el struct cliente** como la consola.
+- `0x80000019` (sid) **no está manejado** por el runtime.
+- ⇒ **Lead accionable (runtime, sin rebuild)**: que `game_overrides` (`sceSifBindRpc`/`sceSifCallRpc`)
+  **complete el `sceSifClientData`** (server/recv/buff) como la consola, y maneje el sid, para que el
+  juego siga la progresión. Es del mismo tipo que los overrides ya existentes.
+
+### 2026-10-10 (9) — El struct cliente RPC **ya lo arma el runtime** con un descriptor en guest RAM; la diferencia es **benigna**
+- `SifBindRpc` (runtime) setea `client->server/buf/cbuf` con un descriptor en **guest RAM**
+  (`rpcAllocServerAddr` → `0xA29880`) + `client->hdr`. ⇒ El `sceSifClientData` (`0xA31940`) **está
+  armado**.
+- El real tiene `client->server = 0x56AF0` (lado **IOP**). Ambos son descriptores válidos ⇒ la
+  **dirección distinta es esperable** (IOP real vs HLE) y **probablemente benigna**.
+- ⇒ La "tabla" `0xA31940` **no** es el gate de progresión: es el `sceSifClientData` que el runtime ya
+  completa.
+- **Balance**: el bloqueo de progresión sigue **sin causa identificada**; se descartó (con evidencia)
+  recompilación, gaps, crt0, micro, estado, heap, render y este client RPC. Los sospechosos que quedan
+  son **servicios del kernel/IOP** (timing/VBlank, RPC sin servir, o el `libsd`) consumidos por la
+  máquina de fases del juego.
+
+### 2026-10-10 (10) — VSync 60 Hz OK; cola de sonido OK; **las RPCs del juego quedan SIN SERVIR** (`rpc=0`)
+- **VSync** del runtime = **60 Hz** (`kVBlankPeriod=16667us`), con flag/tick escritos por VBlank ⇒
+  **timing descartado** (no es "VBlank acelerado").
+- **Cola de sonido**: `638==63c`, `SPIN-EXIT 1016` ⇒ **no clavada** (el spin del engine loop sale).
+- Las **4 RPCs** del juego (`sid=0x80000592`, `0x8000059c`, `0x80000006`) están **sin servir** (`rpc=0`):
+  el runtime las HLE-ea devolviendo 0 + recv en ceros (`game_overrides.cpp:2089`) ⇒ la respuesta que
+  recibe el juego es **0/basura**.
+- Esos sids **no** corresponden a los módulos estándar del IOP (dbcman=`0x80001300`, libsd=`0x80000701`,
+  mcserv=`0x80000400`) ⇒ son **módulos del juego**.
+- ⇒ **Lead concreto (runtime, sin rebuild)**: servir esas RPCs con respuestas plausibles (como se hizo
+  con TYOSD), o hacer que el IOP emulado las bindee. Próximo: leer el contexto del juego en
+  `pc=0x4cf4c8`/`0x4cf9ec` (qué pide y qué espera) y el recv real del savestate.
+
+### 2026-10-10 (11) — Trace SIN debugger: **los savestates son el trace** — leí las respuestas RPC reales
+- El debugger de PCSX2 se clava (breakpoint) ⇒ **no se usa**. Alternativa válida: **savestates** = la
+  memoria del juego por fase + diff.
+- **Leí los buffers RPC del juego** (`client 0xA31900`, `recv 0xA31B80`) en los 8 savestates:
+  - `client (0xA31900)` = **0 en el real** (el runtime lo llena con `0xA29880` ⇒ **diferencia**).
+  - `recv (0xA31B80)` = **`00000008 00000000 00000000 FFFF0001 0000FFFF 00000001 …`** (respuesta real,
+    16 B); el runtime la deja en **0** ⇒ el juego recibe 0.
+  - `rpc-ctx (0xA31940)`: `… 0x1A/0x140, 0x8/0xC, …, 0x56AF0` (constante desde ss02).
+- ⇒ **Fix concreto (runtime, sin rebuild)**: en el branch de
+  `sid=0x80000592/0x8000059c/0x80000006` (`game_overrides.cpp:2089`), **llenar `recv` con la respuesta
+  real** (no ceros) y **no** ensuciar `client`.
+- **Cómo hacer el trace (sin debugger)**: (a) leer buffers clave de los savestates; (b) capturar
+  savestates densos (hotkey-spam) y diffear para una línea de tiempo; (c) habilitar el logging de PCSX2
+  a archivo (`-logfile`).
+
+### 2026-10-10 (12) — Rellenar la respuesta RPC (`SWORD_RPC_FILL`) **NO cambia** el resultado
+- `SWORD_RPC_FILL=1` llena `recv` con la respuesta real (`… FFFF0001 0000FFFF 00000001`) vs baseline
+  (ceros ⇒ `memset 24 B`): resultado **idéntico** (`vram=262144`, micro set A, `xgkick=16`, sin geometría).
+- ⇒ La respuesta RPC **tampoco es el gate**.
+- **Balance acumulado**: descartados recompilación, gaps, crt0, micro, estado, heap, render, client RPC,
+  respuesta RPC, timing (VSync 60 Hz), cola de sonido. El juego corre, renderiza negro y no avanza de
+  fase; la causa sigue siendo **juego-adentro/kernel**, no algo que se arregle en los pasos mecánicos.
+
+### 2026-10-10 (13) — 🎯 Dump TARDÍO: los **punteros de fase** del recomp están **corridos ~0x180** igual que el heap/base
+- Agregado `SWORD_RDRAM_DUMP_LATE` (dump a `tick=1200`, con el juego ya corriendo) + script de "phase
+  vars" que halla las palabras que cambian entre los 8 savestates (gp `0xA28650–0xA2868C` = punteros de
+  fase; `0xB15xxx` = datos).
+- **Con el juego corriendo**, `0xA28640+` **sí** tiene datos (no 0) ⇒ **el recomp llega a una fase**, pero
+  los punteros están **corridos**:
+  - `0xA28668`: recomp `0xA96680` vs real02 `0xA96800` (**+0x180**).
+  - `0xA2866C`: recomp `0xB15A80` vs real02 `0xB15C00` (**+0x180**).
+  - `0xA2864C/50/78/80/84/88/8C`: difieren (algunos más que 0x180).
+- ⇒ **El corrimiento es PERVASIVO** (no sólo el BASE del motor): los **punteros de fase del juego**
+  también están ~`0x180` abajo ⇒ **revive la hipótesis del heap** con evidencia nueva y más fuerte.
+- ⇒ El fix correcto sigue siendo **alinear el heap en ORIGEN**: que la **primera asignación** empiece en
+  `base+0x160` como la consola (hoy `base+0x10`), no parchear punteros uno a uno.
+- **Nota**: el loop de present del runtime corre ~**8/s** (`tick`), no 60/s ⇒ para dumps tardíos usar
+  `tick` bajo o esperar ~150 s.
+
+### 2026-10-10 (14) — 🎯 Logs de PCSX2 (cubren hasta el menú): secuencia real y pistas nuevas
+- **Secuencia real** (tiempos del log): BIOS/boot → IOP carga módulos y **registra los RPC del juego**
+  (`80000592`, `8000059a`, `80000593`, `80000597`, `80000595`, `8000059c`, `80000006`, `80000001`,
+  `80000003`; padman `80000100/101`; dbcman `80001300/131c/131e/131f`; libsd `80000701`; sdstr3 →
+  `573`; cdvd → `30`) → ~**31.5 s** `microVU1 Cached Prog [PC=0000]→[PC=0168]` (**mismo rango 0x0-0x168
+  que el recomp**) → shaders GL → ~**43.5 s** `Mode Changed to NTSC` → ~**64.4–68.3 s** **FMV started/ended**
+  (intro) → **menú** (ss08).
+- **El PAD avanza el juego**: `Pad: ... RB: D+A+P (0x0003FFFF)` a ~33.5 s (input del usuario) ⇒ el juego
+  **requiere input** para pasar el diálogo inicial. La decisión previa "el pad no es gate" es **falsa**:
+  el juego lo lee por el **RPC de PADMAN** (`80000100/101`), no por `scePadRead` directo.
+- **PCSX2 aplica patches del juego** (`SLES-53768_88E95888.pnach` + GameDB: GS `halfPixelOffset`,
+  `autoFlush`, `nativeScaling`) — el recomp **no** (aunque son fixes de GS, no del gate).
+- **Clave**: en el recomp las RPC del juego dan `rpc=0` ⇒ **sus módulos IOP no registran/sirven los RPC
+  del juego** ⇒ se frena **antes** del diálogo/FMV/menú.
+- ⇒ **Próximo (runtime)**: (a) asegurar que el **IOP emulado registre los RPC del juego**
+  (`80000592/8000059c/80000006`, padman `80000100`); (b) **servir el pad** (input).
+
+### 2026-10-10 (15) — 🎯 Divergencia CONCRETA: el recomp registra los RPC **estándar** pero **NO los del juego**
+- Recomp (`[sifcmd] RegisterRpc`): registra `0x80001300/131c/131e/131f` (dbcman), `0x80000701` (libsd),
+  `0x80000100/101` (padman), `0x573` (sdstr3), `0x30` (cdvd).
+- **FALTAN** (que el real **sí** registra): **`0x80000592`**, `0x8000059a`, `0x80000593`, `0x80000597`,
+  `0x80000595`, **`0x8000059c`**, **`0x80000006`**, `0x80000001`, `0x80000003`.
+- ⇒ El juego hace RPC a servidores **no registrados** en el recomp ⇒ `rpc=0` (respuesta nula) ⇒ se frena
+  (el juego solo chequea `v0>=0`, así que no "crashea", pero recibe basura).
+- En el real esos sids se registran a ~24.1 s (fase **sysmem/BIOS**) y ~27.6 s ⇒ los registra un módulo
+  que el recomp **no carga** (candidato: algo de `IOPRP300.IMG` o un IRX extra).
+- ⇒ **Lead concreto (runtime, sin rebuild)**: **registrar/servir esos sids** (o cargar el módulo que los
+  registra) para que el juego avance.
+
+### 2026-10-10 (16) — Bind de los sids del juego = **no-op** (A/B verificado) + el juego SÍ progresa
+- Implementé `SWORD_RPC_SIDS` (SifBindRpc crea server dummy para `0x80000592/…/0x80000006`) y **A/B**:
+  **idéntico** al baseline ⇒ **no-op**. El juego **no** se frena en el bind; ya progresa.
+- **El recomp SÍ llega al TYOSD real** (antes de lo que se creía): `[TYOSD] open path=cdrom0:\SD.BIN;1
+  size=715327488` → `rpc=0x30000 real corre (pre)` → `all-done (TRIAGE bulk)` → `one-shot complete: 44 0
+  -> 40` → vectores **n=1 → n=2**. Lo registrado como "atascado" era un render negro, no un stall lógico.
+- **A 180 s (tick=2520)**: los vectores **se quedan en n=2** y el render es **negro**
+  (`gs:prim type=6/5`, `rgba0=(0,0,0,0)` y `(0,0,0,128)`, 64 prims).
+- **Secuencia real** (logs PCSX2): VU1 `0x0-0x168` (~31.5 s) → `NTSC` (~43.5 s) → **FMV intro
+  (~64.4–68.3 s)** → **menú**. ⇒ El recomp queda **antes del FMV de intro** (fase negra).
+- El **shift del heap persiste** (`614=0xb15cc0` vs real `0xb15c00`; `638/63c=0xa96690` vs `0xa96800`;
+  ~0xC0–0x170).
+- ⇒ **Próximo**: (a) el path del **FMV de intro** (el runtime ya tiene FFmpeg; ¿el juego abre el `.pss`/
+  hace `sceCdRead` del movie y el IPU/decoder no responde?); (b) causa raíz del heap en origen.
+
+### 2026-10-10 (17) — 🎯 El bloqueo es el **sync de AUDIO (SPU2/IOP)**, no un stall lógico
+- Perfil de VBlank (`[triage-vbprof]`): `[id=1 pc=0x6e4cdc st=0 pri=25]` (running),
+  `[id=2 pc=0x4d3fe8 st=2 pri=0 wr=2 wid=3]` (**waiting**), `[id=3 pc=0x628948 st=2 pri=2 wr=1]`
+  (**waiting**); `sems={3:0/255w1 7:0/1w0}` ⇒ **threads del juego bloqueados en semáforos**.
+- `[gen-audio] 6e4dd8 SPIN-EXIT n=<miles>` ⇒ el **productor de audio del juego hace spin en `0x6e4dd8`**
+  esperando que el SPU2 consuma el buffer; el runtime lo rescata con un **hack de SPIN-EXIT** (no modela
+  el consumo real).
+- `[TYOSD] rpc=0x0 ack done` (el juego libera el buffer de streaming) y
+  `[triage-iop] SleepThread id=22 pc=0x493a0 n=118001` (un hilo IOP duerme ~118k veces).
+- `[gen-audio]` y el productor `0x6e4cdc`/`0x6e4dd8` están cerca del `cb productor = 0x6e4348` ya conocido.
+- ⇒ **Lead fuerte y coherente**: el juego espera que el **SPU2 consuma** los buffers de `SD.BIN`
+  (streaming de audio). Al no modelarse el consumo, el game-loop de audio no avanza ⇒ el juego no pasa
+  al **FMV de intro** (luego menú). Coincide con la nota previa: *"el modelo SPU2 del IOP no satisface al
+  driver"*.
+- **Nota**: el runtime **sí** tiene decodificador MPEG/FFmpeg y los `.PSS` (`work/elf/MOVIE/00/…`) ⇒ el FMV
+  en sí no es el bloqueo; lo que falta es **hacer avanzar/consumir el audio**.
+- ⇒ **Próximo (runtime, sin rebuild)**: modelar el **consumo del SPU2** (ENDX/STATX/contadores de
+  posición) para que `0x6e4dd8` salga naturalmente y se señalice el semáforo.
+
+### 2026-10-10 (18) — No hay stall duro: el juego corre pero queda en la **fase negra** (loop a/b)
+- El spin `0x6e4dd8` es el patrón `di` / `mfc0 Status` / `and IE` ⇒ espera fin de **interrupción/DMA**,
+  pero la recomp local limpia IE con `di` y **sale de inmediato** ⇒ no es un spin infinito real.
+- `[gen-audio] 6e4ed0 audio-fn RETURN n=16827` y `6e4dd8 SPIN-EXIT n=16827` ⇒ el audio-fn del juego corre
+  **16827 veces en 180 s (~93/s = 1 por frame)** ⇒ **no bloquea**; el audio loop es normal.
+- El `pc` principal **varía** (`0x6b1e00`, `0x50f76c`, `0x51a670`, `0x6e4468`…) ⇒ el juego **ejecuta
+  código variado**, no está clavado.
+- `[TYOSD-ab]` alterna entre los dos estados de buffer (`638=0xa96690` ↔ `638=0xb15a80`) ⇒ el juego
+  **hace flip a/b** pero ambos son la **fase negra**.
+- **Nota infra**: `work/generated/` es la recompilación **instrumentada** (fprintf `[gen-audio]`,
+  `[TYOSD-*]`, `[triage-*]`); `work/generated_orig/` es la limpia.
+- ⇒ El bloqueo **no es lógico ni de audio**: el juego itera la fase negra y **no transiciona** al FMV/menú.
+  Candidato restante = **variable de estado mal apuntada por el shift del heap** (~0xC0–0x170).
+
+### 2026-10-10 (19) — 🎯 Gate confirmado como candidato #1: **sema 3 (manager SIF) nunca se postea**
+- `FUN_004d4078` (invocado por `_init_sys` `0x4dd618`) crea **`CreateSema(maxCount=255, init=0)` → id 3**
+  + `CreateThread(entry=0x4d3fa0)` (hilo 2) + `StartThread`; el hilo 2 hace **`WaitSema(3)`** y queda parkeado
+  (`st=2`). Traza: `op=68 sema=3` **una vez**, **cero `op=-67 sema=3`** ⇒ **nunca se postea**.
+- En la consola ese sema es el del **manager SIF**: lo postea el **handler de la interrupción SIF** cuando
+  llega la respuesta DMA del IOP. El runtime **no dispara esa interrupción**:
+  `ps2_memory.cpp:2440` devuelve valores **canned** para `0x1000F200..0x1000F260`
+  (`0x1000F230→0x60000`, `0x1000F240→0xF0000002`) ⇒ el estado DMA del SIF es estático.
+- ⇒ **Próximo concreto (runtime, sin rebuild del juego)**: al completar una respuesta RPC, **postear el
+  sema 3** (o disparar la interrupción SIF / actualizar los regs `0x1000F2xx`) para que el hilo 2 procese
+  la cola de replies y el state machine avance al FMV/menú.
+- (Ya registrado antes, se mantiene): forzar el estado del driver de sonido `2→5` es **callejón sin salida**
+  (`state&7==2` es la rama **activa**; `==5` es **idle**) — no reintentar.
+
+### 2026-10-10 (20) — 🚨 CAUSA RAÍZ (recomp): `FUN_004d3fa0` **TRUNCADA** — dispatcher SIF sin recompilar
+- Desensamblé el ELF real (`work/elf/SLES_537.68`) en `0x4d3fa0..0x4d40a0` con capstone. El recomp genera
+  `FUN_004d3fa0` con rango declarado **`0x4d3fa0 - 0x4d3fe8`**, pero la función real **NO termina ahí**:
+  en `0x4d3fe8` arranca un **LOOP de dispatch**:
+  - `0x4d3fe8`: `lw $v1,0($s1)` → `andi 0xff` → contador `(count+1)&0xff`;
+  - `0x4d3ffc/0x4d4000`: indexa `$s2`/`$s0` (buffers `s1+8`/`s1+9`);
+  - `0x4d4004`: `lbu $v0` (byte = **comando**);
+  - `0x4d4008` `==1 → jal 0x4d3150`; `0x4d4028` `==2 → jal 0x4d3210`; `0x4d4038` `==0 → jal 0x4d31d0`;
+    `0x4d4068` default `→ jal 0x4d6080`;
+  - `0x4d4040/50/60/70`: `b 0x4d3fe8` ⇒ **loop infinito** (la función nunca hace `jr $ra`).
+- **El recomp no lo ejecuta**: su `FUN_004d3fa0` hace el `WaitSema(3)` (`0x4d3fe0`, syscall 68 vía
+  `0x4d32e0`) y **retorna en `0x4d3fe8`** ⇒ el **dispatcher SIF nunca corre** y el thread 2 muere tras el
+  primer wait ⇒ **nadie procesa la cola de comandos/replies SIF** ⇒ el juego se frena.
+- **Cobertura de los callees del loop**: `0x4d3150` ✓ y `0x4d31d0` ✓ recompilados; **`0x4d3210` ✗,
+  `0x4d6080` ✗** y la propia región `0x4d3fe8` ✗ (no existen `FUN_*`).
+- `0x4d4078` **sí** es función (prologue `addiu sp,sp,-0x70`) ⇒ el analizador reconoció el prologue
+  siguiente pero **cortó `0x4d3fa0` en `0x4d3fe8`** (el retorno del JAL) dejando el tramo
+  `0x4d3fe8-0x4d4078` **sin función**.
+- ⇒ **Esto es un bug del recompilador (detección de límite de función)**, no del runtime. **Recompilar la
+  región con límite correcto (o recompilar con el fix del boundary) es 100% necesario** para ejecutar el
+  dispatcher SIF. Es el primer caso concreto, verificado contra el ELF, que exige recompilación.
+- ⇒ Fix runtime alternativo (parcial): override de `0x4d3fe8` — pero requiere recompilar/override-ar
+  también `0x4d3210` y `0x4d6080`, hoy ausentes.
+
+### 2026-10-10 (21) — ✅ CONFIRMADO EN RUNTIME: el gap es `0x4d3fe8` (dispatcher SIF no recompilado)
+- Agregué `SWORD_SIF_SEMA` (postea sema 3 al completar cada RPC, emulando la interrupción SIF). Colocación:
+  `RPC.cpp` tras `PS2IopTransport::handleRpc`.
+- **Resultado del run**: `[triage-sema] op=68 sema=3 ra=0x4d3fe8` → el `WaitSema(3)` ejecuta y el thread 2
+  despierta; inmediatamente **`[guest-branch:missing-target] kind=DirectJump source=0x4d3fe8
+  target=0x4d3fe8 pc=0x4d3fe8 a0=0x3 v1=0x44`** ⇒ **el gap ES exactamente `0x4d3fe8`**, el loop del
+  dispatcher SIF identificado en (20).
+- `[triage-vbprof]`: `[id=2 pc=0x4d3fe8 ra=0x4d3fe8 st=5]` (antes: `st=2` dormido en sema 3) ⇒ el thread 2
+  ahora **llega al gap** en vez de quedar parkeado. El gap era **latente** y pasa a **activo**.
+- El juego **no avanza** igual (vectores n=1→n=2, sin FMV) porque el thread 2 queda trabado en el gap.
+- ⇒ **Recompilar es 100% necesario**: hay que **recompilar la región `0x4d3fe8-0x4d4078`** (y sus callees
+  faltantes `0x4d3210`, `0x4d6080`). Causa: el recompilador cerró `FUN_004d3fa0` en `0x4d3fe8` (boundary
+  tomado del símbolo SDK / tamaño), dejando el dispatcher sin traducir.
+- `SWORD_SIF_SEMA` **se mantiene** (env-gated): es la mitad runtime correcta del fix y necesaria para que,
+  una vez recompilado el dispatcher, el thread 2 arranque.
+- **Alcance del bug (medición)**: de **18.310** funciones generadas, **5.285** tienen un **hueco** entre el
+  fin declarado y el inicio de la función siguiente (cota superior: incluye regiones de datos). El detector
+  de límites (símbolos SDK / `sce_symbol_scanner`) es **grueso** ⇒ hay truncamientos latentes por todo el
+  binario, no solo `0x4d3fe8`. Refuerza que el fix correcto es **arreglar el boundary del recompilador y
+  regenerar**, no parchear función por función.
+
+### 2026-10-10 (22) — ✅ RECOMPILACIÓN HECHA: gap `0x4d3fe8` arreglado (dispatcher ya ejecuta)
+- **Causa real confirmada**: `work/ps2_recomp-linux.log:1436` → la generación usó
+  `config-linux.toml` con `ghidra_output` ⇒ **"Loaded 17768 functions from Ghidra map"** ⇒ los límites
+  vienen del **CSV de Ghidra**, no del discovery. La línea `FUN_004d3fa0,0x004D3FA0,0x004D3FE8,72` era el
+  bug. (El `config-release.toml` de `build_release.py` **no** usa el CSV.)
+- **Fix aplicado**: CSV → `FUN_004d3fa0,0x004D3FA0,0x004D4078,216`; `entry_points=["0x4d3fe8"]`;
+  config nuevo `config-linux-sif-fix.toml`; regen a `work/generated.new` (0 errores).
+- **Copia quirúrgica** (evita recompilar 18k objetos): **89 archivos cambiados <4 MB** + `register_functions.cpp`
+  copiados; **23 monolitos** (>4 MB, ya partidos + instrumentados) **preservados**. Backup en
+  `work/generated.pre-recompile`.
+- **Resultado del rebuild + run** (`SWORD_SIF_SEMA=1`, 120 s):
+  - **`missing-target` = 0** (antes 1, en `0x4d3fe8`) ✅.
+  - `0x4d3fe8` ejecuta **142 veces** ⇒ **el dispatcher SIF corre** ✅.
+  - vbprof llega a **n=7081** (antes 5281) ⇒ corre más frames.
+  - **Pero**: TYOSD-vec sigue **n=2**, `rgba` **negro** (`nonZeroRgb=0`), sin FMV ⇒ **la fase no avanza**.
+  - El dispatcher **no ejecuta sus callees** (`0x4d3150/4d31d0/4d3210/4d6008` = 0 llamadas); thread 2 en
+    `pc=0x4d3fe8 st=2` ⇒ corre el loop pero **no despacha comandos** (¿byte/contador de la cola mal, ligado
+    al shift del heap?).
+- ⇒ **La recompilación era necesaria y quedó hecha** (fix permanente en `work/generated`). El bloqueo de
+  fase/render **persiste** y es el próximo objetivo (ver §17–19: sema 3 / cola SIF / shift ~0xC0–0x170).
+- **Nota**: `recompile-plan.md` con el procedimiento; `SWORD_SIF_SEMA` (mitad runtime) sigue siendo
+  necesario para que el thread 2 arranque.
+
+### 2026-10-10 (23) — Post-fix: thread 2 desbloqueado; `SWORD_FORCE_STATE` (on por default) daña; VRAM con datos
+- **Thread 2 desbloqueado**: vbprof post-fix `[id=2 pc=0x4d3fe8 wr=0 wid=0]` (antes `wr=1 wid=3` = esperando
+  sema 3) ⇒ **ya no espera y corre el dispatcher** ✅. (`st=2` = ready, `waitReason=0` = None.)
+- **Mi decode a mano estaba mal**: `0x4d3fec` es `andi $v1,$v1,0x1FF` (no `0xff`) ⇒ ring-buffer de 512
+  entradas; el loop recompilado está correcto.
+- **`SWORD_FORCE_STATE` está ON por default** (`getenv(...)==nullptr || !='0'`) y fuerza el estado del driver
+  de sonido **2→5** (`[gen-state] FORCED 2->5 at 0xcb5c10`). El estado **5 es el idle** (la rama activa es
+  **2**) ⇒ el hack **daña**. Con `SWORD_FORCE_STATE=0` el estado queda en **2** (`state-word=0x5008002`,
+  `state-check v0=2`), que es lo correcto. **Recomendación: desactivarlo por default** (o fijarlo en `0`).
+  - Efecto colateral: cambia los punteros de sonido (`614`: `0xb15cc0` forzado vs `0xb1b400` natural).
+- **Render sigue negro, PERO la VRAM tiene contenido**: `vramNonZero=306048 → 524288/4194304` (512 KB
+  exactos) ⇒ el juego **escribe** en VRAM; el **framebuffer presentado** (`sourceFbp=0/128`, `display1=0`)
+  es negro y `shot-vb nonZeroRgb=0` ⇒ el render target del juego es negro / no se presenta lo dibujado.
+- ⇒ Próximo: por qué el framebuffer dibujado queda negro (¿el juego dibuja a fbp 0/128 y nunca hace el
+  `DISPFB`/`DISPLAY` correcto? ¿el `display1=0` es sospechoso?), y las RPC del juego sin réplica (`rpc=0`)
+  que pueden trabar el state machine de escena. **No** es el dispatcher SIF (ya arreglado).
+
+### 2026-10-10 (24) — El bloqueo residual es el **audio/sync**, no el dispatcher
+- **Semáforos (post-fix, `SWORD_FORCE_STATE=0`, 120 s)**:
+  - `op=68 sema=3` **60×** (el dispatcher cicla ✅; lo despierta `SWORD_SIF_SEMA`).
+  - `op=68 sema=8` 14× / `op=66 sema=8` (SignalSema) 9× → sema 8, más waits que señales.
+  - `op=68 sema=1` **9×** y **cero señales** a sema 1 (creado en CRT0 `0x4dd404`, id=1).
+- **El thread principal (id=1) vive en la función de AUDIO**: `pc=0x6e4ebc` (78 muestras) y
+  `pc=0x4c3bc4` (26). En `0x4c3b98` hace `jal 0x4d32e0` (= **`WaitSema`**, `a0=*(0x8744A0)`); desde el
+  audio (`0x6e4e90`) llama `0x4d3cd8` (wrapper de syscall). El hilo de audio hace spin en `0x6e4dd8`
+  (`[gen-audio] … SPIN-EXIT`).
+- **La presentación está bien**: `dispfb1=0x1000` → `fbp=0, fbw=8, psm=0` (512 px, PSMCT32) = exactamente
+  donde dibuja el juego ⇒ no es un bug de display; el juego **dibuja negro** en su fase.
+- ⇒ **El bloqueo residual es el driver de sonido / sync (SPU2 + semáforos de audio)**, coherente con §17
+  ("el modelo SPU2 del IOP no satisface al driver") y con §23 (`SWORD_FORCE_STATE` dañino: es un parche
+  que enmascara esto). Próximo: por qué `WaitSema(1)`/`sema 8` no cierran el ciclo de audio (¿falta la
+  señal del SPU2 al completar una transferencia?).
+
+### 2026-10-10 (25) — Sema 1 **no** es deadlock (lock re-entrante por contador); wrappers identificados
+- Los wrappers de syscall del SDK quedaron identificados por su número: `0x4d3190`=`GetThreadId` (47),
+  `0x4d32a0`=`CreateSema` (64), `0x4d32b0`=`DeleteSema` (65), `0x4d32c0`=**`SignalSema` (66)**,
+  `0x4d32d0`=`iSignalSema` (-67), `0x4d32e0`=**`WaitSema` (68)**.
+- `0x4c3b50` (enter) / `0x4c3bd0` (exit) son un **lock re-entrante** del juego:
+  - enter: `s0=GetThreadId()`; si `*(0x872058)==s0` (ya lo tenés) → sólo incrementa `*(0x87205C)`; si no →
+    `WaitSema(*(0x8744A0))` (id **1**) y setea `*(0x872058)=s0`.
+  - exit: `--*(0x87205C)`; si queda `!=0` **retorna sin señalar** (anidado); si llega a 0 → `*(0x872058)=-1`
+    y **`SignalSema(*(0x8744A0))`** (⇒ `FUN_004d32c0`, verificado en `FUN_004c3bd0_0x4c3bd0.cpp:84`).
+- ⇒ **`WaitSema(1)` 9× sin señal no es un deadlock**: es normal en un lock re-entrante (el contador
+  permanece >0 mientras un thread lo tiene, y sólo el último release señaliza). **No** es el gate.
+- **Punto caliente real del thread principal**: `pc=0x6e4ebc` = **`ei`** al final de la sección crítica del
+  **audio** (`0x6e4e98`: `di`/`sync.p`/`mfc0 Status`/loop mientras `Status&s0`/`jal 0x6e4068`(`a0=-1`)/`ei`).
+  El hilo principal está **metido en el driver de sonido** ⇒ refuerza que el bloqueo residual es **audio**.
+- **Conclusión de la sesión de hoy**: recompilar resolvió el dispatcher SIF (causa raíz real, verificada);
+  el bloqueo restante está en el **driver de audio / SPU2 del IOP**, no en el dispatcher ni el display.
+  Próximo: `0x6e4068` (worker de audio) y el modelo SPU2 (`ENDX`/`STATX`, contadores de voz/transferencia).
