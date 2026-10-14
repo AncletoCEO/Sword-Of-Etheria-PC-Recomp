@@ -18,7 +18,7 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y cmake ninja-build g++ python3 libgl1-mesa-dev libx11-dev libxcursor-dev libxrandr-dev libxi-dev libxinerama-dev libasound2-dev libpulse-dev
+          sudo apt-get install -y cmake ninja-build g++ python3 libgl1-mesa-dev libx11-dev libxcursor-dev libxrandr-dev libxi-dev libxinerama-dev libasound2-dev libpulse-dev libavcodec-dev libavformat-dev libavutil-dev libswresample-dev libswscale-dev
 
       - name: Checkout and pin PS2Recomp tools
         run: |
@@ -73,8 +73,8 @@ jobs:
 
       - name: Build ps2_recomp and ps2_analyzer
         run: |
-          cmake -S tools-ci -B tools-ci/out -G "Visual Studio 17 2022" -A x64
-          cmake --build tools-ci/out --config Release
+          cmake -S tools-ci -B tools-ci/out -G Ninja -DCMAKE_BUILD_TYPE=Release
+          cmake --build tools-ci/out
         shell: pwsh
 
       - name: Validate scripts and smoke parser
