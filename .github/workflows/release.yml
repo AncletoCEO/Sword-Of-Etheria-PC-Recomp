@@ -23,7 +23,7 @@ jobs:
       - name: Checkout and pin PS2Recomp tools (fork)
         run: |
           git clone --recurse-submodules https://github.com/AncletoCEO/Ps2Recomp-of-etheria.git tools-ci
-          git -C tools-ci checkout c74a7eb5bbe21a3ed4081d8f3e22d394b72e6681
+          git -C tools-ci checkout e7ad25410ebf34b9588d966a8c5844992281c13e
 
       - name: Build ps2_recomp and ps2_analyzer
         run: |
@@ -59,7 +59,7 @@ jobs:
       - name: Checkout and pin PS2Recomp tools (fork)
         run: |
           git clone --recurse-submodules https://github.com/AncletoCEO/Ps2Recomp-of-etheria.git tools-ci
-          git -C tools-ci checkout c74a7eb5bbe21a3ed4081d8f3e22d394b72e6681
+          git -C tools-ci checkout e7ad25410ebf34b9588d966a8c5844992281c13e
         shell: pwsh
 
       - name: Build ps2_recomp and ps2_analyzer
