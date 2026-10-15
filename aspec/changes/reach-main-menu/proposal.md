@@ -1,10 +1,15 @@
 # Proposal: reach-main-menu
 
-> **ENTRADA VIGENTE: `HANDOFF.md`.** Este proposal se conserva, pero sus hipótesis de foco
-> (`sema 8`, state machine de escena, RPC sin réplica, watchpoint) quedaron **superseded**. El gate real
-> (2026-10-09) es un **wait cruzado** en la fase de carga: ver `HANDOFF.md` §7–§8.
-> La afirmación de abajo de que "el juego ejecuta su lógica, no gira en un loop" resultó **incorrecta**: el
-> recomp queda **congelado** en la fase de carga (ver `decisions.md`).
+> ⚠️ **HISTÓRICO (2026-10-15).** Para el estado vigente: **`decisions.md` §2026-10-15** y el bloque
+> "ESTADO ACTUAL" de `HANDOFF.md`. Resumen: el **arranque y el render están desbloqueados** (VRAM ~475 KB,
+> `dma` ~1.700, `activeThreads=3`, CI en verde); el bloqueo restante es que el **frame presentado sigue
+> negro** (el juego dibuja el fade/clear). Las hipótesis de foco del texto de abajo (`sema 8`, RPC sin
+> réplica, state machine, watchpoint) están **superseded**; ver `decisions.md` ("Descartado").
+>
+> **ENTRADA VIGENTE: `HANDOFF.md`** (con su bloque de estado actual). Este proposal se conserva como
+> registro; sus hipótesis de foco quedaron **superseded**. El gate real (2026-10-09) fue un **wait
+> cruzado** en la fase de carga: ver `HANDOFF.md` §7–§8. La afirmación de abajo de que "el juego ejecuta
+> su lógica, no gira en un loop" resultó **incorrecta** (ver `decisions.md`).
 
 ## Problem
 

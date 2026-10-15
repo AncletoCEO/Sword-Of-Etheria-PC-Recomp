@@ -3,6 +3,26 @@
 **Fecha**: 2026-10-09. **Este es el documento de entrada.** Reemplaza a `reanalysis.md` (obsoleto) y
 consolida `decisions.md`. Si algo acá contradice a otro artifact, **vale este**.
 
+> ⚠️ **SUPERSEDED (2026-10-15).** El diagnóstico nuclear de este documento (juego *parkeado en la fase
+> de carga*; hilo 1 en *busy-spin del lock `0x4C3B50`*; hilo 3 en `SleepThread` sin alcanzar `0x628A10`;
+> `gp+0x58=0`; `nonZeroRgb=0` con `dma=3`) quedó **obsoleto**. La fuente vigente es **`decisions.md`**
+> (§2026-10-15) y el detalle de tareas en `tasks.md`. Abajo, §"ESTADO ACTUAL".
+>
+> ### ESTADO ACTUAL (2026-10-15)
+>
+> - **El arranque y el render están desbloqueados**: `gp+0x58` se libera, el streaming completa
+>   (`burst_maxdst` `0xDAFE80`), el main thread está en el loop de escena (`0x6D6FE8`),
+>   **`dma` pasó de 3 a ~1.700** y la **VRAM tiene datos reales (~475 KB)**.
+> - **`activeThreads=3`, `gif=2`, `vif=6`**, sin crash. **CI en verde** (Linux + Windows).
+> - **Lo que falta**: el **frame PRESENTADO sigue negro** (`nonZero=0`, con `rgbNZ=0 / aNZ≈238k`) —
+>   el juego dibuja el **fade/clear** (quads negros) pero no llega el contenido con color/textura.
+> - **Causa raíz en curso**: la tabla de handlers RenderWare `0x008A4CAC` (`{id:0x16}` = `FUN_006f2630`,
+>   llamada **182×/frame** sin slot) ya se resolvió (missing-target: 200 → 2); ahora la **FSM de carga
+>   `FUN_00628640`** (switch `jr $v0` con un hueco de 740 B en el CSV, jump table en `0x009E0180`)
+>   quedó cubierta (784 B) y **hay un build corriendo** con el CSV de **20.434** filas.
+> - **Regla vigente**: ningún build sin `work/validate_csv.py` en verde (`0 SHADOW / 0 MIDFUNC`).
+> - Fecha del resto del documento: 2026-10-09/11 (histórico).
+
 > **ACTUALIZACIÓN 2026-10-11 (Parte 2)** (ver `tasks.md` §"Sesión 2026-10-11 (Parte 2)"):
 > 1. **Destrabe de Streaming y Transición de Escena**: se descubrió que el hilo 3 (cargador de streaming
 > `0x628640`) cicla llamando a `0x4CF860` (`sceCdDiskReady`). Al estar `sceCdRead` en HLE, el semáforo
