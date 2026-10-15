@@ -56,3 +56,45 @@ sema3=60×/sema8=17w-9s/sema1=9×, pc top del thread 1 solo 1.2%).
 Se **descarta el modelo SPU2** como camino principal (ver `proposal.md`): el audio no bloquea
 (evidencia del baseline). El foco pasa al **state machine de escena + `sema 8` + RPC sin réplica**.
 El SPU2 queda sólo como contingencia si el trazado de fase lo vuelve a señalar.
+
+## Producto final — arquitectura (plan 2026-10-15, no implementado)
+
+**Componentes (separación de responsabilidades):**
+
+- **`sword_etheria` (el juego)**: ventana raylib + runtime + C++ recompilado. Lee un **config**
+  (ruta del ISO + opciones) y arranca. No pide input de usuario en consola.
+- **Launcher (front-end propio, liviano)**: una sola pantalla.
+  - `ISO`: selector de archivo + validación **MD5** (reutiliza `check_iso` de `build_release.py`) +
+    persistencia de la ruta (p. ej. `%APPDATA%/sword-etheria/config.toml` en Windows,
+    `~/.config/sword-etheria/config.toml` en Linux).
+  - `Opciones`: resolución, modo ventana/fullscreen, escalado (entero/lineal), vsync, límite de FPS,
+    dispositivo de audio/volumen, pad y remapeo, idioma si aplica.
+  - `Acciones`: **Generar** (si falta el build: invoca `build_release.py --iso <ruta>` con progreso y
+    log visible) y **Jugar** (lanza `sword_etheria --config <archivo>`).
+  - Recomendación: launcher **aparte** (no un menú in-game) — mantiene el core limpio y permite que
+    el juego siga siendo scriptable por CI.
+- **Config único (`.toml`)**: lo comparten launcher y juego. El juego mapea opciones a lo que ya
+  existe (env `SWORD_*` + `config.toml`), sin inventar un segundo mecanismo.
+
+**Reproducibilidad del CSV (punto 7 del proposal):**
+
+- `game/generate_functions_csv.py`: reproduce `ghidra_functions.csv` desde el ELF + reglas explícitas
+  (baseline, `MANDATORY_OVERRIDES`, splits de fusionadas, clamps de `entry_` invasoras, filtro de
+  **referencias reales**, y las altas puntuales tipo `FUN_006f2630`). El CSV commiteado pasa a ser la
+  **salida** del script ⇒ cada cambio es un diff revisable y no depende de tener Ghidra.
+- Regla operativa vigente: **ningún build sin `validate_csv.py` en verde**.
+
+**CI (`release.yml`) — estado y plan:**
+
+- Hecho: clonar el **fork pinneado** (`AncletoCEO/Ps2Recomp-of-etheria`, `main`), sin `apply_patches`;
+  deps de FFmpeg en Linux; Ninja en Windows; `-msse4.1` + `g_tyosdTransferActive` en el fork.
+- Plan: agregar el **paso del gate** (`validate_csv.py`) y, en el job de release por tag, empaquetar
+  **launcher + tools + `build_release.py`** para Windows y Linux.
+
+**Modelo legal (sin contenido con copyright):**
+
+- Nunca al repo: `*.iso`, `*.elf`, `*.bin`, `*.exe`, `work/`, `*.recomp.cpp`, capturas.
+- Sí al repo: nuestro código (recompilador, runtime, `build_release.py`, CI), el CSV
+  (nombres/direcciones/tamaños = metadatos, sin bytes de código ni assets) y los artifacts del change.
+- El runtime (fork) es **GPLv3**; el binario distribuido que lo enlaza queda cubierto por esa licencia,
+  con su fuente disponible (el fork).
