@@ -423,3 +423,57 @@ necesita un **trace de ejecución con registros** (herramienta aparte).
 Ver `HANDOFF.md` §7–§8. En corto: **wait cruzado** (hilo 1 spin de lock / hilo 3 SleepThread / hilo 2 sema 3);
 falta identificar **quién** debe hacer el `SignalSema`/`WakeupThread` y **qué** espera cada uno. Herramientas:
 `SWORD_TRACE_BRANCH` (+`tid=`), `SWORD_CHAIN`, PINE.
+
+---
+
+## 2026-10-15 — Decisiones de producto y de método (plan; NO implementado)
+
+> Definidas en conversación. El "qué" queda fijo para no re-decidirlo; el "cómo" se ejecuta al cerrar
+> el hito del menú. Detalle: `proposal.md` §"Producto final" y `design.md` §"Producto final — arquitectura".
+
+**Producto**
+
+- **Alcance**: el juego **completo**, por fases. El hito vigente sigue siendo **llegar al menú**
+  (`nonZeroRgb > 0` con los triages apagados).
+- **Plataformas**: **Windows + Linux**.
+- **Distribución**: **GitHub Releases** por tag `v*`, con **launcher + tools + `build_release.py`**.
+- **Launcher**: componente **aparte** (no menú in-game) — pide el ISO, expone opciones (resolución,
+  escalado, vsync/FPS, audio, pad), escribe un **config `.toml` compartido** con el juego y ofrece
+  **Generar** (`build_release.py --iso`) y **Jugar** (`sword_etheria --config …`).
+
+**Contenido y licencia**
+
+- El repo **no versiona nada con copyright**: ISO, ELF, `*.bin`, `*.exe`, `work/`, `*.recomp.cpp` y
+  capturas quedan fuera (`.gitignore`). El usuario aporta su ISO (validado por **MD5**).
+- **CORRECCIÓN de criterio**: el ISO se necesita **también en runtime** (los assets se leen del CD vía
+  `io.cdRoot`) ⇒ el launcher **persiste la ruta del ISO** y la usa para generar **y** para jugar.
+- El runtime/IOP parcheado vive en el **fork GPLv3** pinneado (`AncletoCEO/Ps2Recomp-of-etheria`); el
+  binario distribuido queda cubierto por GPLv3 con su fuente en el fork. Este repo sigue **MIT**.
+
+**Fidelidad (deuda declarada)**
+
+- Se **aceptan** los overrides por dirección de `game_overrides.cpp` por ahora. La revisión de
+  fidelidad (runtime sin parches puntuales) queda **explícitamente como deuda** para cuando el juego
+  esté completo. Mismo tratamiento para el alcance funcional completo (gameplay/audio/cinemáticas/guardado).
+
+**Método (reglas nuevas, no re-descubrir)**
+
+- **Ningún build sin el gate del CSV**: `validate_csv.py` en verde (`0 SHADOW / 0 MIDFUNC / 0 MISSING`)
+  antes de recompilar. Costó un build de ~5 h entenderlo. Se mueve a `game/` y corre en CI.
+- **Los `missing-target` se clasifican por REFERENCIA REAL** (JAL/J, branch externo, tabla de punteros,
+  vtable, pares LUI+ADDIU del registro de plugins) **y nunca por “estar después de un `jr $ra`”**.
+  El split por epílogo solo (4.240 puntos) rompió el runtime (falsos positivos: ramas internas sobre
+  early-returns, p.ej. `0x4ddab0`); con el filtro quedaron **1.134 reales**.
+- **El CSV es un input de build**: se versiona, pero con **generador reproducible** en `game/`
+  (`generate_functions_csv.py`) para que cada cambio sea un diff revisable sin depender de Ghidra.
+- **Edit del runtime por el fork**: los cambios de runtime/IOP van al fork pinneado (commit + push) y el
+  CI clona ese commit — no se regeneran parches. `game/patches/upstream/` queda **legacy**.
+
+**Hechos (CI) del 2026-10-15**
+
+- CI en verde: fork pinneado + FFmpeg dev (Linux) + Ninja (Windows) + `-msse4.1` +
+  `g_tyosdTransferActive` movido a `iop_emulator.cpp`.
+- Fix del CSV que **desbloqueó el render**: VRAM pasó de `0` a **475 KB** no-cero y `dma` de `3` a `1727`.
+- Causa del **frame presentado negro** identificada: `FUN_006f2630` (handler `{id:0x16}` de la tabla
+  `0x008a4cac`, que debe devolver `true`) se llamaba **182 veces por frame** sin slot ⇒ sin swap/fade.
+  Fix aplicado (clamp de `FUN_006f25a0` + alta de `FUN_006f2630`); build en curso al escribir esto.
