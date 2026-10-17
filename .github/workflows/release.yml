@@ -36,6 +36,13 @@ jobs:
           python3 build_release.py --help
           python3 game/smoke_report.py --help
 
+      - name: Validate functions CSV (gate pre-build)
+        run: |
+          # REGLA: ningun build sin el gate en verde (0 SHADOW / 0 MIDFUNC).
+          # El CI no tiene el ELF/ISO: corre los chequeos que no lo requieren
+          # (overlaps, starts sombreados). Local, con el ELF, agrega MISSING/MIDFUNC.
+          python3 game/validate_csv.py
+
       - name: Package artifacts
         run: |
           mkdir -p dist/tools/PS2Recomp/out dist/game

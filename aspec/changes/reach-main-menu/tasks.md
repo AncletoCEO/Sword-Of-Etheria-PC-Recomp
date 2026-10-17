@@ -1,6 +1,14 @@
 # Tasks: reach-main-menu
 
 > Estado 2026-10-09. Entrada: **`HANDOFF.md`**. Se podaron las tareas superseded para no inducir a error.
+>
+> ⚠️ **2026-10-17 — este archivo es un LOG POR SESIÓN (histórico).** Las mediciones de cada sesión valen
+> para su fecha. En particular, las líneas que dicen **`vramNonZero=0` / "sigue negro" por falta de
+> dibujo** quedaron desactualizadas: hoy `vramNonZero` sube a **368801/475456**, la geometría **llega al
+> GS** (`[vif1-chain]`, `[gs:kick] drawing=1 pc=0x6e4468`) y el problema es **qué página se presenta**.
+> Fuente vigente: `decisions.md` §2026-10-17 + §"Artefactos de medición".
+> Lo que **sí** sigue válido de acá: el `SWORD_TEST_PATTERN` prueba que **el present funciona** (se ve un
+> gradiente forzado) ⇒ si la pantalla está negra no es el display roto, sino **qué VRAM lee**.
 
 ## Hecho
 
@@ -124,3 +132,38 @@
   **allocador `FUN_004c3000`**. No hay path de DMA/CD/runtime que escriba esa región.
 - Rebuild completo con `ps2TraceGuestWrite` para "encontrar al escritor" → **innecesario** (el escritor ya
   está enumerado) y caro (18 311 `.cpp`).
+
+---
+
+## Plan de producto (definido 2026-10-15 — NO implementar aún)
+
+> Estos items quedan planificados; se ejecutan al cerrar el hito del menú. Ver `proposal.md`
+> §"Producto final" y `design.md` §"Producto final — arquitectura".
+
+**Hito actual (sigue siendo lo prioritario)**
+
+- [ ] **Frame presentado con `nonZeroRgb > 0`** con los triages apagados (menú visible).
+- [ ] Cerrar los `missing-target` restantes clasificándolos con el mismo criterio
+      (**referenciados** de verdad: JAL/J/branch/tabla/vtable) y NO por cercanía a un epílogo.
+
+**Launcher (entregable propio)**
+
+- [ ] Definir el alcance de la UI (resolución, fullscreen, escalado, vsync/FPS, audio, pad).
+- [ ] Selector de ISO + validación MD5 (reutilizar `check_iso` de `build_release.py`).
+- [ ] Persistencia del config (`%APPDATA%` en Windows, `~/.config` en Linux) compartido con el juego.
+- [ ] Acción **Generar** (invoca `build_release.py --iso`, con progreso/log visible).
+- [ ] Acción **Jugar** (lanza `sword_etheria --config <archivo>`).
+- [ ] Empaquetado por plataforma (Windows + Linux) en el release por tag `v*`.
+
+**Reproducibilidad y calidad**
+
+- [ ] `game/generate_functions_csv.py`: reproducir el CSV desde el ELF + reglas (baseline, overrides,
+      splits, clamps, filtro de referencias, altas puntuales como `FUN_006f2630`).
+- [ ] Mover `work/validate_csv.py` a `game/` y agregarlo como **paso del CI** (gate antes del build).
+- [ ] Documentar el modelo de contenido (el ISO se necesita **también para jugar**; el repo no lleva
+      nada con copyright).
+
+**Deuda declarada (a revisar con el juego completo)**
+
+- [ ] Fidelidad del runtime: revisar los overrides por dirección de `game_overrides.cpp`.
+- [ ] Alcance funcional completo (gameplay, audio, cinemáticas, guardado) por fases.

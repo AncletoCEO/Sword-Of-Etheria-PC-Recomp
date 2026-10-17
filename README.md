@@ -7,9 +7,13 @@ versión PAL Europa) a binario nativo de PC con
 ## Estado
 
 Experimental: el juego arranca, carga sus `.BIN` desde el disco, inicializa
-GS/VSync y corre a 60 FPS, pero queda en pantalla negra en un spin-wait
-(`0x6e4d98`, ver `game/6e4d98-spinwait-triage.md`). Todavía no hay menú
-jugable. Los glitches gráficos/sonoros son limitación conocida de PS2Recomp.
+GS/VSync y corre su bucle (VBlank a ~58/s; el *task update* del juego a ~9/s),
+pero **la pantalla queda negra**. Medido 2026-10-17: la geometría **sí** llega
+al GS (`[vif1-chain]`, `[gs:kick] drawing=1`) y **hay contenido en VRAM**
+(`vramNonZero` hasta 475456) — lo que falta es que se **presente la página
+correcta** (se presenta la del clear/fade). Todavía no hay menú jugable.
+Detalle y camino muertos: `aspec/changes/reach-main-menu/decisions.md` §2026-10-17.
+Los glitches gráficos/sonoros son limitación conocida de PS2Recomp.
 
 ## Requisitos
 
@@ -45,11 +49,16 @@ Cómo se usó cada una en este proceso:
   `aspec/changes/recompile-sword-of-etheria/`; skills `ancleto-apply` (implementar),
   `ancleto-verify` (verificar) y `cleto-*` en el agente; memoria del proyecto en
   `.ancleto/memory.db`.
-- Modelos de IA: solo se usaron **Big Pickle** y **Muse Spark**, ofrecidos por
-  **OpenCode Zen** (agente OpenCode con las skills de arriba, commits atomizados
-  + push por cada cambio).
-- Recompilador: [PS2Recomp](https://github.com/ran-j/PS2Recomp). `ps2xAnalyzer`
-  como vía alternativa de análisis; `ps2xRecomp` tradujo el ELF a C++
+- Modelos de IA: la **generación inicial** de los `.cpp` recompilados (arranque del
+  proyecto) se hizo con **Big Pickle** y **Muse Spark**, ofrecidos por **OpenCode Zen**
+  (agente OpenCode con las skills de arriba, commits atomizados + push por cada cambio).
+  De ahí en adelante el trabajo se hace con **Command Code** (agente) más **Gemini** como
+  consulta externa, a la que se le pasa el contexto del proyecto en el primer mensaje.
+- Recompilador: [PS2Recomp](https://github.com/ran-j/PS2Recomp) (proyecto original, solo
+  atribución). **El runtime que se usa y se parchea es el fork
+  [AncletoCEO/Ps2Recomp-of-etheria](https://github.com/AncletoCEO/Ps2Recomp-of-etheria)**
+  (GPLv3): `build_release.py` y el CI clonan ese fork — el CI contra un **commit pinneado**.
+  `ps2xAnalyzer` como vía alternativa de análisis; `ps2xRecomp` tradujo el ELF a C++
   (17771 archivos en `work/generated/`); `ps2xRuntime` es contra lo que enlaza
   el juego e incluye `game_overrides.cpp` (162 syscall stubs + hooks de
   CD/Pad/GS); `ps2xIOP` ejecuta los IRX originales con fallbacks HLE.
