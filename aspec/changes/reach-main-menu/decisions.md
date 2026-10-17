@@ -851,10 +851,30 @@ falta identificar **quién** debe hacer el `SignalSema`/`WakeupThread` y **qué*
   negra: la fase del menú arrancó **limpiando** y todavía no dibuja (falta cargar sus assets).
   El loader sigue mostrando el nodo `id=0x07010000` en `state=3`.
 
-**Próximo paso (séptima versión)** — instrumentar el substep 1 de `FUN_00500490` (mismo método que la
-barrera 1: leer el generado + loguear la condición) y los nodos del loader de los assets del menú
-(`0x06054001`, `0x06020000`, `0x06020800`, `0x06054801`, `0x06051601` según el v66) para ver cuál queda
-en state 1/2. Verificación del hito: `[gs:diag] crt1 rgbNZ > 0` y `frame_*.bmp` con píxeles.
+**2026-10-17 (séptima ronda) — el estado del juego YA ES el del menú real; lo que falta son los assets del menú**
+
+- ⚠️ **Corrección de la ronda anterior**: dije "sexta barrera: `FUN_00500490 sub=1`". **Falso**: medido
+  contra el savestate real (`work/teleport/eeMemory.bin` = estado de menú), Task#1 del **menú real** está
+  en `h20=0x500490`, **`+0x38 = 1`**, `count=4` ⇒ **nuestro estado coincide exactamente con el del menú**.
+  `FUN_00500490` no lee el substep: el gate lo hace con el getter `FUN_005105F0` = `return *(task+0x38)`
+  (verificado: `jr $ra` + delay slot `lw $v0, 0x38($a0)`), y sólo con `== 2` instala otro handler
+  (`0x004FFBE0`) — camino que el real **tampoco** toma (`[menu-gate] ret` va 0 → 1 y se queda en 1 ✓).
+- **La Task#4 (menú) es idéntica al real**: real `t4+0x00=0x51, +0x08=2, +0x10=0x28, +0x20=0x0083d990,
+  +0x34=4, +0x38=0xa`; nuestro `t3st=2 t3sub=10` (mismos `+0x08`/`+0x38`) ✓ y `count=4` ✓.
+- **El fix del pad funciona como se esperaba**: `[pad-getstate] port=0/1 open=1 state=5/6` alternando
+  (¡el HLE ahora sí se llama: 400+ veces!) ⇒ la FSM del juego avanza y llegó al handler del menú.
+- **Lo único que difiere del menú real**: **la lista del loader**. En el real
+  (`*(gp-0x348)`, sentinel embebido en `loader+0x68`) hay **6 nodos** con los assets del menú en `state=3`:
+  `0x06051601, 0x06054801, 0x06020800, 0x06020000, 0x06054001, 0x07010000` (+ el sentinel `id=0 st=4`).
+  En nuestro run sólo aparece `id=0x07010000 st=3` y el resto de la lista no tiene nodos válidos
+  ⇒ **los 5 assets del menú nunca se encolaron** ⇒ la Task#4 del menú no tiene con qué dibujar ⇒ negro.
+  (Coherente: VRAM quedó borrada al entrar la fase y no se volvió a escribir: `[gs:diag] aNZ=0`.)
+
+**Próximo paso (octava versión)** — instrumentar el **enqueue de archivos** (`FUN_004f9ff0(loader, id,
+flag)` y `FUN_004f9d00`) para ver **qué ids pide el juego** en nuestro run y si los 5 del menú aparecen:
+si nunca se piden, el problema está *aguas arriba* de la Task#4 (en quién debería pedirlos); si se piden
+y no se encolan (o el loader no los procesa), el problema está en el loader del juego o en el servicio de
+archivos del runtime. Comparar contra el savestate real (`work/teleport/eeMemory.bin`) en cada paso.
 
 **Próximo paso (cuarta versión — SUPERSEDED por la quinta de arriba)** — el camino al menú pasa por la fase, no por el render:
 1. **Watchpoint real sobre `0xA93728`** (mprotect+SIGSEGV, tipo el viejo `SWORD_WP_WRITER`): enumerar quién
