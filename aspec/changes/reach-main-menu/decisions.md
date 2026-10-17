@@ -804,11 +804,31 @@ falta identificar **quién** debe hacer el `SignalSema`/`WakeupThread` y **qué*
   `Pad.cpp`, `PadDualshock2.cpp`, …) ⇒ es la referencia para implementar el dispositivo y que padman
   complete sus comandos (estado del pad → 6 = Stable).
 
-**Próximo paso (quinta versión)** — implementar el dispositivo de pad SIO2 en el fork (capa de
-plataforma): registros SIO2 + protocolo DualShock2 (0x01/0x42/0x43/0x45/0x46/0x47/0x4C/0x4D/0x4F/0x5A),
-guiado por `tools/ps2emu/pcsx2/SIO/Pad/` como **referencia** (PCSX2 es GPL-3.0: portar con criterio y
-atribución, no copiar a archivos MIT). Verificación: `[pad-e1a0] state` → 6, `root sub` → 3 → … → count 4
-y `frame_*.bmp` con RGB ≠ 0.
+**2026-10-17 (quinta ronda) — verificado: el SIO2 del IOP es memoria muerta (por eso el pad no llega a "ready")**
+
+- (a) **`FRAME_1` decode: correcto** (duda cerrada con PCSX2 `GIFRegFRAME`): el runtime hace
+  `fbp = value & 0x1FF`, **`fbw = (value >> 16) & 0x3F`**, `psm = (value >> 24) & 0x3F`
+  (`gs_frontend.cpp:1362-1365`) ⇒ coincide con el hardware. Explica el `[gs:present] ctx=80/8/0`
+  (página 80 = 0x280000, 512 px, PSMCT32). `decodeDisplayFrame` (bits 0-8/9-14/15-19) es el de `DISPFB` ✓.
+- (b) **`sio2man` y `padman` SÍ se cargan y arrancan** en el IOP emulado:
+  `[iop-preload] SIO2MAN.IRX moduleId=1 start=0` / `PADMAN.IRX moduleId=2 start=0` +
+  `[ps2xIOP] [IOP] loaded IRX id=2 entry=0x14304 base=0x11000`. Y el HLE del EE **sí** intercepta
+  `scePadInit (0x4e9aa8)` y `scePadPortOpen (0x4e9eb0) port=0/1`.
+- **(c) La causa**: los registros SIO2 (`0x1F8082xx`) **no están implementados** en el IOP:
+  `IopMemory::writeHardware32` guarda el valor en `m_hardware[address]` (sin dispositivo detrás) y
+  `readHardware32` devuelve **0** (`default: return 0u`, `emulator/core/iop_memory.cpp:253/283`).
+  Los únicos imports implementados son cdvd/heaplib/intrman/ioman/loadcore/stdio/sysclib/sysmem/
+  timrman/vblank ⇒ **no hay pad ni sio2**. ⇒ padman escribe sus comandos y lee ceros para siempre:
+  el estado del pad queda en **3** y la barrera 2 nunca pasa.
+- **No hay binds RPC de pad/sio2** en el log (sólo `0x80000592` cdvd, `0x80000006`, `0x573`, `0x30`), y
+  `[pad-getstate]` (el stub HLE de `scePadGetState`) = **0 llamadas**: la máquina de estados del pad es la
+  del juego (0x51xxxx + libpad recompilado 0x4E9xxx/0x4EA2B8), y su fuente es **padman en el IOP**.
+
+**Próximo paso (sexta versión)** — implementar el **dispositivo SIO2** con el pad (y "sin memory card")
+en el IOP/fork, guiado por `tools/ps2emu/pcsx2/SIO/Sio2.cpp` + `SIO/Pad/Pad.cpp` + `PadDualshock2.cpp`
+(registros `SIO2_CTRL=0x1F808268`, `SIO2_TX=0x1F808260`, `SIO2_FIFO_TX/RX=0x1F808278/7C`, según
+`pcsx2/IopHw.h`), incluido el estado/IRQ del SIO2 si padman no sondea. Verificación: `[pad-e1a0] state`
+→ 6, `root sub` 2 → 3 → …, `count` → 4 y `frame_*.bmp` con RGB ≠ 0.
 
 **Próximo paso (cuarta versión — SUPERSEDED por la quinta de arriba)** — el camino al menú pasa por la fase, no por el render:
 1. **Watchpoint real sobre `0xA93728`** (mprotect+SIGSEGV, tipo el viejo `SWORD_WP_WRITER`): enumerar quién
