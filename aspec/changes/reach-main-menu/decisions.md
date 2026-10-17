@@ -887,11 +887,31 @@ falta identificar **quién** debe hacer el `SignalSema`/`WakeupThread` y **qué*
 - Nota de método: el walk anterior leía `sentinel = (gp-0x348) + 0x68` (dirección del **puntero**) en vez de
   `loader + 0x68` (valor) ⇒ 0 nodos. Ya corregido.
 
-**Próximo paso (novena versión)** — aplicar la receta de la barrera 1 al nodo trabado `0x06020000`:
-instrumentar `FUN_004fa110` (el progreso del loader por frame, llamado en `0x512980`) y loguear
-`FUN_006290f0(1)` (¿terminó la lectura?) y `FUN_004f3b60` (¿el parseo del contenedor devuelve != 0?) para
-ese id, más `*(loader+0x6C)` (nodo en curso). Eso decide si el freno es el **servicio de lectura** del
-runtime (el `sceCdRead` no completa para ese archivo) o el **parseo del contenedor**.
+**2026-10-17 (novena ronda) — el grafo del menú está COMPLETO y coincide con el real; no se dibuja nada**
+
+- **Corrección (otra vez mía)**: lo de "asset en `state=2`" era **timing**: con el walk corregido (el
+  `next` del nodo está en **+4**, no en +0 — `+0` es `prev`; el sentinel vive en `loader+0x68` y su head en
+  `+0x6C`) los **6 assets están en `st=3` con `md=3`** (`0x07010000, 0x06054001, 0x06020000, 0x06020800,
+  0x06054801, 0x06051601`), igual que en el savestate. Los heads de recursos del loader también están
+  poblados (`res10=0xe89320`, `res34=0xe7ce60`, `res58=0xe21760`).
+- **La Task#4 del menú está construida y registrada** (medido en `*(*(mgr+4)+8)` = 0xe21590):
+  `h20=0x83d990 sub=10` (**idéntico al real**), y con lo que pidió el v67:
+  **`+0x5C = 0xe84f60`** (draw tree), **`+0x7C = 0xe89a10`** (controlador de sprites),
+  **`C0 = 0xe81c30`** (recurso de layout `0x15616100`), **`1B4 = 0xe81bc0`** (textura `0x65216110`),
+  `+0x84 = 0xe7c750` (array de 9), `+0x8C` (capa 2D). Es la **misma estructura que el menú real**
+  (`+5C=0xE27440`, `$s0=0xE27260`, `C0=0xE27420`, `1B4=0xE26E40`). (Nota: `*(Task#1+0x80)` es 0; el
+  puntero a Task#4 sale de `*(mgr+4)`.)
+- **Y sin embargo no se dibuja NADA**: `[gs:diag] crt1 rgbNZ=0 aNZ=0` y `vramNonZero=3119` (ni los quads
+  de fade que aparecían antes) ⇒ el pase de dibujo del menú **no emite paquetes al GS**.
+  ⇒ **El bloqueo ya no está en la lógica de tareas ni en la carga**: está en el **render** (quién recorre el
+  draw tree `+0x5C` / la capa 2D / el fade-in `*(gp-0x33C)` vtable+0x5C) o en la presentación.
+
+**Próximo paso (décima versión)** — instrumentar el **pase de dibujo**: (a) quién recorre `*(Task#4+0x5C)`
+y con qué virtuales (log de las llamadas indirectas desde el caminador de la lista de dibujo), (b) el fade
+`*(gp-0x33C)` vtable `+0x5C` (valor del fade por frame) y (c) si el controlador `0xe89a10` recibe su virtual
+de dibujo. Comparar con el real: en `eeMemory.bin` el mismo camino existe con datos (sólo cambian las
+direcciones). Buen momento para el **v68** (el grafo está completo: la pregunta pasa a "¿qué recorre el draw
+tree y qué lo gatea?").
 
 **Próximo paso (cuarta versión — SUPERSEDED por la quinta de arriba)** — el camino al menú pasa por la fase, no por el render:
 1. **Watchpoint real sobre `0xA93728`** (mprotect+SIGSEGV, tipo el viejo `SWORD_WP_WRITER`): enumerar quién
