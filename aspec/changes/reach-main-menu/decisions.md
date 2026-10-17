@@ -647,9 +647,50 @@ falta identificar **quién** debe hacer el `SignalSema`/`WakeupThread` y **qué*
   kicks posteriores estén vacíos. Des-rate-limitarlo antes de afirmarlo.
 
 **Próximo paso corregido** (NO revisar el balance de `$sp`; NO tocar el CSV por esto)
+> Los 4 puntos quedaron ejecutados el mismo 2026-10-17: el 1 confirmó el `YIELD`; el 2 se midió
+> (≈9 ticks/s, ver segunda ronda); el 3 sigue abierto; el 4 se hizo (y refutó el "kick vacío").
 
 1. Rebuild con el wrapper corregido y leer `RETURN` vs `YIELD` de las cinco llamadas del bucle de frame.
-2. Por qué ~1,7 ticks/s: medir `eeCycle` por tick y perfilar el lazo de `FUN_00512630` + `0x50f750`.
+2. ~~Por qué ~1,7 ticks/s~~ medir `eeCycle` por tick (dio ≈9 ticks/s + patrón a ráfagas).
 3. El `pc=0` del hilo 1: decidir si es la convención del scheduler (legítimo) o el flujo real perdido
    (contaminación del contexto del callback RPC sobre el del hilo 1).
-4. Des-rate-limitar `[dma:kick]` (n>25) para ver si después de vb 2000 los kicks siguen vacíos.
+4. ~~Des-rate-limitar `[dma:kick]`~~ hecho: los `qwc=0` eran modo cadena (ver segunda ronda).
+
+**2026-10-17 (segunda ronda) — el "kick VIF1 vacío" también era artefacto; y el tick corre a ~9/s**
+
+- **Instrumentación agregada** (fork local, branch `diag-loader-rpc`): `[dma:kick]` sin rate-limit
+  (primer tramo + cada kick con datos + resumen cada 600, con `withData=`), `[tick-prof]` en el hook de
+  `0x50f750` (`eeCycle`/`dCycle`/`cycPerTick`/`vsync`/`dVsync` + estado de hilos), `vsync=` en
+  `[rpc-call]`/`[rpc-callback]` y **auditoría `[dma-reg]`** de las escrituras a los registros de canal
+  DMA (`0x10008000-0x1000AFFF`, dedup por valor).
+- **`[dma:kick]`: 395 001 kicks en 180 s, `withData=0` en todos** — pero **eso NO significa que no se
+  transfiera nada**: el juego NO usa MADR/QWC. `[dma-reg]` muestra que escribe **`TADR`
+  (`0x10009030`)** (alternando `0xa96700`/`0xb15b00`) y `CHCR=0x145`; **MADR jamás se escribe**.
+  `0x145` ⇒ `mode = (chcr>>2)&3 == 1` ⇒ **modo cadena**: el runtime toma el camino de TADR
+  (`ps2_memory.cpp:1600+`, que además implementa `CHCR.TTE` bit 6 = 0x40 para canales VIF). ⇒
+  el probe de `madr/qwc` en el kick es **el tercer artefacto de medición de la sesión** (después del
+  wrapper del frame-loop y del flush del trace). **NO concluir "no hay geometría" de `qwc=0`.**
+- **La geometría SÍ fluye**: `[vif1-chain]` con datos reales (`qw=177`, `qw=4`, `qw=1`…, p.ej.
+  `src=0xa96710 qw=177 data=8006 10000000 e 0 44 0 42 0 …`) y **`[gs:kick] drawing=1 prim=6/5
+  vtxCount=1..3 pc=0x6e4468`** (94 en 60 s) ⇒ el GS recibe prims desde el sitio de draw del juego.
+- **Perfil del tick (180 s)**: `[tick-prof]` da **~9 ticks/s** (1610 ticks) contra **58 VBlank/s**;
+  `cycPerTick` dentro del task update es **chico** (0,5-1 M ciclos) y el reloj EE está **anclado a
+  tiempo real** (`294 MHz` ⇒ `eeCycle=5,17e10` en 180 s ✔). El patrón es **a ráfagas**: 10 ticks dentro
+  de 1 VBlank y después huecos de **~340-360 VBlank (~5,8 s)**. O sea: el hilo 1 está **ocioso (`pc=0`)**
+  la mayor parte del tiempo y despierta en ráfagas; cuando corre un tick aparece en `SignalSema`
+  (`pc=0x4d32c0 ra=0x51eeb4`).
+- **VRAM sí tiene contenido** (`vramNonZero=368801/475456`) pero el **frame presentado** sigue negro:
+  `[gs:diag] crt1 (fbp=0) rgbNZ=0 aNZ=131233` ⇒ la página **presentada** es la del clear/fade (alpha
+  sin RGB) y el contenido dibujado vive en **otra página**. `gp+0x740`/`0x744` siguen en 0 (fase menú
+  nunca registrada).
+
+**Próximo paso (tercera versión)**
+
+1. **La pantalla**: el bloqueador ya no es "falta geometría" (llega al GS) sino **qué página se
+   presenta**. Comparar `DISPFB`/`DISPLAY`/`PMODE` del recomp contra el savestate de la misma fase y
+   ver si el juego llega a flipear (`[gs:present]` da `dispfb1=0x1400`/`dispfb2=0x80000001000`), y si el
+   camino de presentación del runtime respeta `DISPFB` o presenta una página fija.
+2. **Por qué el tick es a ráfagas y el hilo 1 está ocioso**: qué espera en los huecos de ~5,8 s
+   (¿thread 3 en `0x628948` + RPC `sid=0x573`?). Medir con el `vsync=` que ahora tienen las trazas RPC.
+3. Revisar (con la lente de esta sesión) **todo dato de log que se haya usado como síntoma**:
+   `madr/qwc` en el kick, "RETURN" del wrapper, y logs vacíos por falta de flush.
