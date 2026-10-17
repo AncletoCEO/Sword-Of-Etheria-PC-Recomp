@@ -536,7 +536,8 @@ falta identificar **quién** debe hacer el `SignalSema`/`WakeupThread` y **qué*
   **Única diferencia: `gp+0x638`/`gp+0x63C`** — que son **cursor por frame** (`0x638` avanza de a 8
   bytes por descriptor) y valen 0 porque no hay nada que dibujar. El problema es el **productor**.
 
-- **RAÍZ ACOTADA (2026-10-16):** **nadie encola geometría.** `FUN_006e58b8` (enqueue de packets) no
+- ~~**RAÍZ ACOTADA (2026-10-16):** **nadie encola geometría.**~~ **(REFUTADO 2026-10-17: `FUN_006e58b8` sí
+  se ejecuta y tiene call sites; ver §2026-10-17.)** `FUN_006e58b8` (enqueue de packets) no
   recibe llamadas de producción; el árbol de escena corre con la lista de entidades vacía.
   **`FUN_0075b0e0` (constructor de la fase del menú) no tiene ni un `jal` en todo el binario** —
   sólo aparece en la tabla de fases (`0x95f3d4: .word 0x0075B0E0`) y en la tabla de registro.
