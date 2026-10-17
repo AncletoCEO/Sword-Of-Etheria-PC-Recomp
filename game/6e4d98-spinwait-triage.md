@@ -1,5 +1,17 @@
 # Triage: spin-wait en `0x6e4d98` (pantalla negra)
 
+> ⚠️ **MÉTODO DE ESTE DOCUMENTO INVÁLIDO — corregido 2026-10-16.** El parche `triage6e4d98` que
+> propone acá —y **todos** los `[triage-*]` del proyecto— son **INERTES**: se registran sobre
+> direcciones **INTERNAS** de una función (`0x6e4d98` está dentro de `FUN_006e4cc0`), y el C++
+> recompilado cae de forma secuencial con `goto` **sin consultar `m_functionTable` para saltos
+> internos**. Prueba: `[triage-flow]` (`0x6e4e1c`, inline en `FUN_006e4cc0`) nunca disparó, pero el
+> flip **sí corrió** (`[dma:kick] … ra=0x6e4ebc`, posterior al bloque).
+>
+> **El diagnóstico de fondo SÍ es válido y quedó confirmado**: *"la espera es síntoma; falta el
+> productor"*. Ver `aspec/changes/reach-main-menu/HANDOFF.md` §ESTADO ACTUAL (2026-10-16).
+>
+> **Tratar como histórico.** Lista de caminos muertos en `work/gemini/README.md`.
+
 Fecha: 2026-10-03. Log: `work/build-game/coldboot-negro.log` (ignorado por git, solo local).
 
 ## Hallazgo

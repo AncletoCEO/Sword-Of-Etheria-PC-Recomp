@@ -477,3 +477,179 @@ falta identificar **quién** debe hacer el `SignalSema`/`WakeupThread` y **qué*
 - Causa del **frame presentado negro** identificada: `FUN_006f2630` (handler `{id:0x16}` de la tabla
   `0x008a4cac`, que debe devolver `true`) se llamaba **182 veces por frame** sin slot ⇒ sin swap/fade.
   Fix aplicado (clamp de `FUN_006f25a0` + alta de `FUN_006f2630`); build en curso al escribir esto.
+
+**Hechos del 2026-10-16 (sesión larga: fix del loader + cadena medida + refutaciones)**
+
+- **FIX APLICADO Y VERIFICADO — semáforo de completado RPC.** El stub `sifBindRpcStub`
+  (`game_overrides.cpp`, reemplazo de `sceSifBindRpc` en `0x004d7008`) no creaba el semáforo que el
+  SDK nativo sí crea (`0x4d7084: jal CreateSema` → `0x4d7090: sw $v0, 0x8($s1)`). Se agregó
+  `eeScheduler().createSemaphore(1, 1, 0, 0)` y se escribe el id en `clientPtr + 8`.
+  **Efecto medido**: `hdr.sema_id` pasó de `0xffffffff` a ids reales (10/11/14/15) y **el loader del
+  hilo 3 pasó de mudo a emitir RPC** (`client=0xa468f0 rpcNum=0x1` y `0x2`, con `[seed-a46940]`
+  disparando). Antes: bindeaba y nunca llamaba.
+  - **`init=1` es un SHIM, no lo que dice el SDK.** El SDK usa `init_count=0, max_count=1`
+    (`0x4d7078`/`0x4d7088`). Con `init=0` el `WaitSema` bloquea de verdad y, como el runtime no
+    señala el completado de los SIDs de BIOS (`0x80000592`, con `SWORD_IOP_BIOS_RPC` apagado), el
+    Hilo 1 queda dormido y el juego **sale solo** (`Game thread returned. PC=0x74a428`).
+    Volver a `init=0` cuando el runtime señale bien ese completado.
+
+- **REFUTACIONES de la sesión (todas por medición, no por razonamiento):**
+  1. **Sembrado de `0xA46940`** (fix del `end_func` `FUN_00628610`): apunta a `sid==0x30`, pero la
+     ruta real llega con `sid=0x80000592` y `endFn=0`. Nunca se cumple.
+  2. **Fallback `completionSemaphore = endParameter`** (RPC.cpp): **ELIMINADO**. `end_para` es un
+     dato arbitrario para `end_func(void*)`, nunca un id. El guard `>0xFFFF` filtraba bien.
+  3. **Semáforo 8 / semáforo 3 como bloqueantes**: no lo son. El 3 lo cubre `SWORD_SIF_SEMA=1`; el
+     8/12 es el mutex del pad, que se toma y suelta en el mismo frame.
+  4. **`gp+0x5EC` / `gp+0x62C` como "compuerta cerrada" y "anillo vacío"**: **valen 0 también en la
+     consola.** El guard `0x6e4ce0: beqz → 0x6e4d84` toma el **camino rápido hacia el flip**, no lo
+     saltea.
+  5. **`gp+0x610` en cero (guard de overflow)**: **falso, vale `0xb15a80`** — el motor se inicializa
+     bien (coincide con consola en `0x5DC`/`0x614`).
+  6. **"El juego alcanzó el menú"**: falso. Los `gp740=0xc68c10`/`gp744=2` venían **solo de las
+     corridas con savestate inyectado** (`[load-gs] VRAM inyectada`, `[id=1 st=5]`), no del flujo.
+
+- **LECCIÓN DE MÉTODO (regla nueva):** **medir contra el savestate ANTES de encadenar deducciones.**
+  En esta sesión se encadenaron y cayeron 6 hipótesis; cada corrección vino de un dato duro.
+
+- **LECCIÓN TÉCNICA (regla nueva, invalida trabajo previo):** **todo `replaceFunction` sobre una
+  dirección INTERNA de una función es INERTE.** El C++ recompilado cae de forma secuencial con `goto
+  label_...` y **nunca consulta `m_functionTable` para saltos internos**. Prueba: `[triage-flow]`
+  (`0x6e4e1c`, instrucción inline dentro de `FUN_006e4cc0`) nunca disparó… y el flip **sí corrió**
+  (probado por `[dma:kick] … ra=0x6e4ebc`, posterior al bloque). **Revisar todos los `[triage-*]` del
+  proyecto con esta lente.**
+
+- **CADENA MEDIDA HOY (de causa a síntoma):** el motor gráfico entra (`[hit-6e4cc0]`,
+  `[hit-6e4848]`), el setup de boot es correcto, y **el único kick de DMA sale vacío**
+  (`qwc=0`, `madr=0`). Sin paquetes ⇒ `gp+0x61C` no avanza ⇒ el flip despacha un lote de tamaño 0.
+
+- **COMPARACIÓN CONTRA SAVESTATE REAL (`work/teleport/eeMemory.bin`, menú):** coinciden
+  `gp+0x74`/`gp+0x80` (loader), `gp+0x5DC`, `gp+0x610`, y **los tres callbacks del árbol de escena**
+  (`0x00a888c8`/`cc`/`d0` = `0x5ea400`/`0x5ea5a0`/`0x6d5f90` ≡ `s7_110`/`114`/`118` del recomp).
+  **Única diferencia: `gp+0x638`/`gp+0x63C`** — que son **cursor por frame** (`0x638` avanza de a 8
+  bytes por descriptor) y valen 0 porque no hay nada que dibujar. El problema es el **productor**.
+
+- **RAÍZ ACOTADA (2026-10-16):** **nadie encola geometría.** `FUN_006e58b8` (enqueue de packets) no
+  recibe llamadas de producción; el árbol de escena corre con la lista de entidades vacía.
+  **`FUN_0075b0e0` (constructor de la fase del menú) no tiene ni un `jal` en todo el binario** —
+  sólo aparece en la tabla de fases (`0x95f3d4: .word 0x0075B0E0`) y en la tabla de registro.
+
+- **HALLAZGO NUEVO — la tabla de fases está registrada como CÓDIGO:** en
+  `FUN_0095b2a8_0x95b2a8.cpp` la tabla se decodificó como instrucciones:
+  `0x95f3c0: throw std::runtime_error("Unhandled SPECIAL instruction: 0x1 at 0x9593C0")` y lo mismo
+  en `0x95f3d4`. Y `register_functions.cpp` tiene
+  `g_ps2RecompiledFunctionTable[1211634] = FUN_0095b2a8_0x95b2a8; // 0x95f3d0`.
+  Hay **dos saltos reales** a la tabla: `FUN_009470e0:2852 → 0x95F3D0` y `FUN_00953bc8:46643 →
+  0x95F3D4` (desde `0x9593C8: beq $zero, $v1, +0x1802<<2`). **Si el juego toma esa rama, el recomp
+  ejecuta datos como código y lanza excepción.** Pendiente de confirmar con hook en la entrada de
+  `FUN_0095b2a8` (sin crash en el log de 35 s ⇒ o no se dispara o no se registra).
+
+- **Herramientas perdidas:** `SWORD_WP_WRITER` (watchpoint de escritura) ya no existe en el fork;
+  habría servido para vigilar `0xA286A8` (`gp+0x638`).
+
+**Bucle de frame y por qué el juego no avanza del Frame 1 (2026-10-16, cierre de sesión)**
+
+- **El bucle de frames existe y es infinito**: `FUN_0051fea0` (`0x51fea0-0x51ff20`). El bucle
+  **arranca en `0x51FED4`** y contiene, en orden: `0x51FED4` → `51F370`, `51FEDC` → `513370`
+  (input/pad), **`0x51FEE8` → `512AB0` (update de escena/fases)**, `51FEF0` → `512630`,
+  `51FEF8` → `512140`, `51FF00` → `513320` (render submit), `51FF08` → `51FD90`,
+  `51FF10` → `51F330`; y cierra con **`0x51FF18: b 0x51FED4`**.
+  **Ojo**: el `goto label_51fed4` aparece al FINAL del label en el generado, pero la arista de
+  retorno va después del `jal`, así que la llamada SÍ está dentro del bucle. (Error de lectura
+  cometido y corregido el 2026-10-16.)
+- **El runtime NO debe conducir el frame**: los juegos de PS2 corren su propio bucle infinito en el
+  hilo 1; el scheduler sólo debe dejarlo correr y atender las interrupciones (VBlank/DMA). El CRT0
+  que defiere `0x51FEA0` está bien.
+- **El selector de fase se consulta UNA sola vez** (hooks sobre funciones completas, que sí
+  funcionan): `FUN_0051f450` = 1, `FUN_0051f580` = 1 en 35 s. Es consecuencia de que el Frame 1 no
+  cierra, no una causa.
+- **REFUTADO (v64 de Gemini)**: que `FUN_0074a308` quede atrapada en el bucle de lista de `0x74a4f0`.
+  Instrumentada entrada vs retorno: **ENTER 18 / RETURN 20** — entra y **vuelve siempre**. Las
+  muestras del hilo 1 se reparten entre `0x74a4f0` (12), `0x74a428` (12) y `0x74a5b8` (2): son sus
+  tres búsquedas secuenciales, o sea **recorre, no está clavada**.
+- **MAPA del bucle de escena** (dato firme): `FUN_0074cab8` → **`FUN_0074ac48`**
+  (`0x74ac48-0x74bb00`, 7400 líneas; **contiene el bucle `0x74B970`** en la línea 6668) →
+  `FUN_0074a308` (18×). `FUN_0074cab8` **no tiene `jal` directo**: se entra por indirección.
+- **Condición de salida del bucle de escena** (`0x74b980: bnez $s0, → 0x74B970`): recorre una lista
+  con `$s0` como iterador, pasa `$a1 = $s0` y llama un **método virtual (`jalr`)** por iteración;
+  sale cuando `$s0 == 0` y entonces llama a `FUN_006d640`.
+- **PENDIENTE (próximo paso)**: instrumentar los **targets de las llamadas indirectas**
+  (`GuestBranchKind::IndirectCall`) en el rango `0x74b970-0x74b980`. Si el iterador avanza por nodos
+  distintos la lista está sana y el frame se frena por otra razón; si repite el mismo nodo, **hay un
+  ciclo en la lista**.
+- **Técnica que SÍ funciona (regla)**: hook sobre **función completa** registrando **entrada y
+  retorno** (patrón `lookupFunction` + `replaceFunction` con log antes y después de delegar). Es la
+  única forma de probar "se colgó acá" sin tropezar con la regla del punto 7 de los caminos muertos.
+
+**2026-10-17 — REFUTADO: "`FUN_00512630` retorna con el `$ra` equivocado" (la causa raíz de `work/START_NEXT_SESSION.md`)**
+
+> Leído el artefacto antes de afirmar (regla 1). No hay nada que arreglar en el generado/CSV por este lado,
+> y el dato que sostenía la hipótesis es un **artefacto del hook**.
+
+- **El frame de `FUN_00512630` está balanceado y es fiel al ELF.** Generado
+  (`work/generated/FUN_00512630_0x512630.cpp`, 2346 líneas) vs. ELF (`0x512630..0x512aa0`, desensamblado):
+  - prólogo `0x512630: addiu $sp,$sp,-0x80` + `0x512634: sd $ra,0x60($sp)`;
+  - epílogo `0x512a74: ld $ra,0x60($sp)` … `0x512a90: jr $ra` con delay slot `0x512a94: addiu $sp,$sp,0x80`;
+  - **un solo prólogo y un solo epílogo**: el único otro `addiu $sp` del archivo es justamente el del
+    delay slot del `jr` (grep), y la única escritura dentro del frame es `sw $zero,0x7C($sp)` (slot
+    distinto del `$ra` en `0x60`). ⇒ ninguna ruta ajusta `$sp` sin revertirlo, y el slot del `$ra` no se pisa.
+- **`raOut=0x5129e4` es artefacto del wrapper, no un `$ra` corrupto.** El hook `[frame-loop]`
+  (`game_overrides.cpp`≈4407) mide `ctx->r[31]` **después** de `ORIG(...)` **sin mirar `ctx->pc`**. El
+  generado hace `return` desde el cuerpo por dos vías normales:
+  1. aristas hacia atrás con `eeCheckpointDue()` (`0x512a6c → 0x512674`);
+  2. `dispatchGuestBranch` devuelve `false` en el checkpoint previo a una llamada
+     (`ps2_runtime.cpp:1440`), y el llamador hace `return`.
+  En ambas, el wrapper loguea "RETURN" de una función **que no terminó**, y `$ra` en ese instante es sólo
+  el retorno del último `jalr` interno: `0x5129e4` = `0x5129dc + 8`, el `jalr $t9` de la vtable en
+  `0x5129dc` (target: la hoja `FUN_00591b90`, `0x591b90..0x591bd0`, un setter de float con clamp).
+  - **Evidencia directa**: muestreo del hilo 1 (`[triage-vbprof]`) → `pc=0x591b90 ra=0x5129e4`
+    (vb≈1741): el estado "parked en el dispatch a la hoja", exactamente lo que predice un yield.
+  - **Instrumentación corregida** (local, sin commitear en el fork): el wrapper loguea
+    `pcIn/pcOut/spIn/spOut/dsp` y clasifica `RETURN` sólo si `pcOut == retorno esperado`
+    (`0x51fef8/0x51ff00/0x51ff08/0x51ff10/0x51ff18`); si no, `YIELD`.
+  - **Prueba definitiva** (rebuild + corrida de 120 s, 2026-10-17):
+    ```
+    [frame-loop] f512630 ENTER n=1 pcIn=0x512630 raIn=0x51fef8 spIn=0x1fedee0
+    [frame-loop] f512630 YIELD n=1 yields=1 pcOut=0x591b90 raOut=0x5129e4 spOut=0x1fede60 dsp=0xffffff80
+    ```
+    `pcOut=0x591b90` = **la entrada de la hoja** (el dispatch que quedó pendiente), y `dsp=-0x80` = el
+    frame del prólogo **todavía asignado** (epílogo no ejecutado). No hubo retorno: hubo yield.
+- **Caveat de método (nuevo): el trace no sirve para conteos chicos.** `SWORD_TRACE_BRANCH` abre su
+  `static std::ofstream` en el primer match y **nunca lo flushea**; `timeout` mata con SIGTERM ⇒ un rango
+  con pocas transferencias deja `/tmp/sword_branch.log` en **0 bytes aunque sí haya matcheado** (el
+  archivo existe). No concluir "no pasó nada" de un log vacío: usar un rango ancho (miles de líneas) o
+  agregar flush.
+
+**Medición 2026-10-17 (180 s, `SWORD_SIF_SEMA=1 timeout 180`, build 2026-10-17 00:45)**
+
+- `[frame1] FUN_00512ab0` ENTER/RETURN **n=1** (t≈0,5 s) y `[frame-loop] f512630` ENTER/YIELD **n=1**
+  (t≈25 s, vb≈1501) ⇒ **una sola iteración del bucle de frame en 180 s**; `0x512140/0x513320/0x51fd90/0x51f330`
+  nunca se alcanzan. (El hook loguea `n<=4`, así que para `n=1` el conteo es exacto, no rate-limitado.)
+- **Pero el juego SÍ avanza por otro camino**: el hook de `0x50f750` ("task/scene update") corre
+  **≥1200 veces** en 180 s (dumps `frame_1..frame_1200.bmp` de su propio contador) ⇒ **~5-7 ticks/s**
+  (~9× más lento que 60 fps), no "Frame 1 congelado".
+- **Quién itera**: `FUN_00512630` es un **bucle** (`0x512674..0x512a6c`, condición `lw $v1,0x8($s1)`) que
+  llama `FUN_00510f20` (`0x512968`) → **`0x50f750`**. La única invocación de `0x512630` itera cientos de
+  veces: el bucle de frame espera a que ese lazo de fase termine.
+- **Trayectoria del hilo 1** (vbprof): `0x74a428/0x74a4f0` (lazo de `FUN_0074a308`, yields en la arista
+  trasera) de vb 61 a 1621 (≈27 s) → `0x547b60`/`0x4f5074` → **`0x6279d0` con `ra=0x0`** (vb 1741) →
+  desde vb≈1981 `pc=0x0` con excursiones a `0x6e58d4` (`FUN_006e58b8`) y `0x51a758`.
+  - `0x6279d0` es el **callback RPC invocado con `$ra=0` por diseño** (`RPC.cpp:777`
+    `SET_GPR_U32(&callback.context, 31, 0u)` + `invocationStackTop()`), y `pc=0` es la marca de
+    "invocación terminada" del scheduler. Revisar si ese `pc=0` del hilo 1 es legítimo.
+- **`FUN_006e58b8` (el *enqueue* de packets) SÍ se ejecuta** y tiene call sites reales
+  (`0x6e7ca0`, `0x6e7d44`, `0x6e7da4`, `0x6f28c0`, `0x638db0`) ⇒ revisar el "sin llamadas de producción"
+  del 2026-10-16.
+- `gp+0x638 == gp+0x63C == 0xa96688` (**no 0**) ⇒ el cursor de la cola de packets no está vacío;
+  `gp+0x740`/`gp+0x744` siguen en 0 (fase menú nunca registrada).
+- **VRAM**: `vramNonZero` pasa de 0 a **368801/475456** recién al final (`[gs:present] #730..#750`) ⇒ el
+  render sí sube datos. El frame **presentado** sigue negro (`[gs:diag] crt1 (fbp=0) rgbNZ=0 aNZ=262144`).
+- **`[dma:kick]` está rate-limitado a n≤25** y las 25 salen `qwc=0` ⇒ **no se puede concluir** que los
+  kicks posteriores estén vacíos. Des-rate-limitarlo antes de afirmarlo.
+
+**Próximo paso corregido** (NO revisar el balance de `$sp`; NO tocar el CSV por esto)
+
+1. Rebuild con el wrapper corregido y leer `RETURN` vs `YIELD` de las cinco llamadas del bucle de frame.
+2. Por qué ~1,7 ticks/s: medir `eeCycle` por tick y perfilar el lazo de `FUN_00512630` + `0x50f750`.
+3. El `pc=0` del hilo 1: decidir si es la convención del scheduler (legítimo) o el flujo real perdido
+   (contaminación del contexto del callback RPC sobre el del hilo 1).
+4. Des-rate-limitar `[dma:kick]` (n>25) para ver si después de vb 2000 los kicks siguen vacíos.

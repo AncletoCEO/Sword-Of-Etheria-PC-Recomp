@@ -3,6 +3,34 @@
 **Fecha**: 2026-10-09. **Este es el documento de entrada.** Reemplaza a `reanalysis.md` (obsoleto) y
 consolida `decisions.md`. Si algo acá contradice a otro artifact, **vale este**.
 
+> ### ESTADO ACTUAL (2026-10-16)
+
+> - **Único cambio de flujo de la sesión**: fix del **semáforo de completado RPC** en `sifBindRpcStub`
+>   (`game_overrides.cpp`). El stub no creaba el semáforo que el SDK sí crea. Efecto medido: el loader
+>   del hilo 3 **pasó de mudo a emitir RPC** (`client=0xa468f0 rpcNum=0x1`/`0x2`). `init=1` queda como
+>   **shim documentado** (el SDK usa `init=0`; volver cuando el runtime señale el completado de BIOS).
+> - **La pantalla sigue negra.** `vramNonZero=0/4194304` en corridas reales; **2 kicks de DMA, los dos
+>   vacíos** (`qwc=0`). Con savestate inyectado dibuja bien (`vramNonZero=29544`): **el renderer está sano**.
+> - **Cadena medida de punta a punta**: el motor gráfico entra (`[hit-6e4cc0]`, `[hit-6e4848]`), su setup
+>   de boot es correcto, y el flip **sí corre** (probado por `[dma:kick] … ra=0x6e4ebc`, posterior al
+>   bloque). `gp+0x638`/`gp+0x63C` son **cursor por frame** y valen 0 porque **no hay paquetes que enviar**.
+> - **Raíz acotada**: **nadie encola geometría** (`FUN_006e58b8` sin llamadas de producción) porque
+>   **`FUN_0075b0e0` — la fase del menú — no tiene ni un `jal` en todo el binario**; sólo se alcanza por
+>   la tabla `0x95F3D0`/`0x95F3D4`.
+> - **Hallazgo abierto (posible bug del recompilador)**: esa tabla quedó **decodificada como código**
+>   (`throw std::runtime_error("Unhandled SPECIAL instruction")` en `0x95f3c0`/`0x95f3d4`) y tiene
+>   entrada en la tabla de funciones (`// 0x95f3d0`). Hay dos saltos reales hacia ella
+>   (`FUN_009470e0:2852`, `FUN_00953bc8:46643`). Pendiente: hook en `FUN_0095b2a8` para ver si entra.
+> - **Verificado contra savestate real**: loader (`gp+0x74`/`0x80`), motor (`gp+0x5DC`/`0x610`) y
+>   **los tres callbacks del árbol de escena** coinciden con consola. La divergencia es sólo el cursor,
+>   y es consecuencia.
+> - **Reglas nuevas**: (a) **medir contra el savestate antes de encadenar deducciones** — 6 hipótesis
+>   cayeron hoy, todas por dato duro; (b) **`replaceFunction` sobre una dirección INTERNA de una función
+>   es INERTE** (el C++ recompilado cae con `goto`, nunca consulta la tabla) ⇒ revisar todos los
+>   `[triage-*]` del proyecto con esa lente.
+>
+> ---
+>
 > ⚠️ **SUPERSEDED (2026-10-15).** El diagnóstico nuclear de este documento (juego *parkeado en la fase
 > de carga*; hilo 1 en *busy-spin del lock `0x4C3B50`*; hilo 3 en `SleepThread` sin alcanzar `0x628A10`;
 > `gp+0x58=0`; `nonZeroRgb=0` con `dma=3`) quedó **obsoleto**. La fuente vigente es **`decisions.md`**
