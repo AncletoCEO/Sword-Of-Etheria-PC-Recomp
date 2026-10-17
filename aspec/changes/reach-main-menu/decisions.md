@@ -870,11 +870,28 @@ falta identificar **quién** debe hacer el `SignalSema`/`WakeupThread` y **qué*
   ⇒ **los 5 assets del menú nunca se encolaron** ⇒ la Task#4 del menú no tiene con qué dibujar ⇒ negro.
   (Coherente: VRAM quedó borrada al entrar la fase y no se volvió a escribir: `[gs:diag] aNZ=0`.)
 
-**Próximo paso (octava versión)** — instrumentar el **enqueue de archivos** (`FUN_004f9ff0(loader, id,
-flag)` y `FUN_004f9d00`) para ver **qué ids pide el juego** en nuestro run y si los 5 del menú aparecen:
-si nunca se piden, el problema está *aguas arriba* de la Task#4 (en quién debería pedirlos); si se piden
-y no se encolan (o el loader no los procesa), el problema está en el loader del juego o en el servicio de
-archivos del runtime. Comparar contra el savestate real (`work/teleport/eeMemory.bin`) en cada paso.
+**2026-10-17 (octava ronda) — los assets del menú SÍ se encolan, pero uno queda en `state=2`**
+
+- **Corrección de la séptima ronda**: dije "los 5 assets del menú nunca se encolaron". **Falso** (mi walk
+  estaba mal: imprimía el *loader* como si fuera el head). Instrumentado el enqueue real
+  (`FUN_004f9f50`, `a1` = id), el juego pide **los 6 ids exactos, una vez cada uno**:
+  ```
+  id=0x7010000 ra=0x500600   id=0x6054001 ra=0x83cfe4   id=0x6020000 ra=0x7f820c
+  id=0x6020800 ra=0x83dcb8   id=0x6054801 ra=0x83dcc8   id=0x6051601 ra=0x83dcd8
+  ```
+  (el primero desde la barrera 1 `FUN_00500570`; los otros desde la tarea del menú `0x83xxxx`/`0x7fxxxx`).
+- **El freno real**: el head de la lista (`loader = *(gp-0x348)`; sentinel embebido en `loader+0x68`,
+  `next` del sentinel en `loader+0x68`) es **`id=0x06020000` con `state=2`** — en el savestate de menú ese
+  asset está en **`state=3`**. ⇒ **un asset del menú quedó a medio cargar** y la tarea del menú no tiene con
+  qué dibujar (VRAM sube a 527407 pero `[gs:diag] crt1 rgbNZ=0`: lo que hay son los quads de fade).
+- Nota de método: el walk anterior leía `sentinel = (gp-0x348) + 0x68` (dirección del **puntero**) en vez de
+  `loader + 0x68` (valor) ⇒ 0 nodos. Ya corregido.
+
+**Próximo paso (novena versión)** — aplicar la receta de la barrera 1 al nodo trabado `0x06020000`:
+instrumentar `FUN_004fa110` (el progreso del loader por frame, llamado en `0x512980`) y loguear
+`FUN_006290f0(1)` (¿terminó la lectura?) y `FUN_004f3b60` (¿el parseo del contenedor devuelve != 0?) para
+ese id, más `*(loader+0x6C)` (nodo en curso). Eso decide si el freno es el **servicio de lectura** del
+runtime (el `sceCdRead` no completa para ese archivo) o el **parseo del contenedor**.
 
 **Próximo paso (cuarta versión — SUPERSEDED por la quinta de arriba)** — el camino al menú pasa por la fase, no por el render:
 1. **Watchpoint real sobre `0xA93728`** (mprotect+SIGSEGV, tipo el viejo `SWORD_WP_WRITER`): enumerar quién
