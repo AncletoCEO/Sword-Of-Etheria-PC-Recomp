@@ -732,3 +732,58 @@ falta identificar **quién** debe hacer el `SignalSema`/`WakeupThread` y **qué*
    su **último safe point**, no el que tiene vivo el hilo en ese instante; y para invocaciones del scheduler
    (`pc=0` = "invocación terminada", ver `RPC.cpp:777` `SET_GPR_U32(...,31,0)`) publican ese 0. No leer
    `pc=0` como "el hilo murió" sin más.
+6. **`Store32` NO ve la RAM normal**: el generado escribe RAM con `WRITE32(...)` → `isSpecialAddress()==false`
+   → **`FAST_WRITE32`**, que no pasa por `PS2Runtime::Store32`. Un watchpoint puesto en `Store32` es
+   **ciego** para cualquier dirección normal (p.ej. heap `0xA9xxxx`); sólo ve registros/IO. Ya estaba
+   advertido en HANDOFF §6 ("watchpoint de stores en el generado") y se volvió a pisar: el `[phase-flag]`
+   de esta sesión dio 0 escrituras por esto. Para RAM normal hace falta **mprotect+SIGSEGV**
+   (el viejo `SWORD_WP_WRITER`, hoy ausente) o instrumentar el **generado** de la función dueña.
+
+---
+
+## 2026-10-17 (tercera ronda) — la fase: el lazo de `FUN_00512630` no tiene salida
+
+- **`[gs:present]` ahora trae histograma de VRAM y el fbp del contexto**: el contenido está en los
+  **primeros 2 MB** (buckets 0-7 de 256 KB con ~25% de bytes ≠ 0) y el patrón de 25% = **sólo alpha**
+  (el clear/fade `0x7F000000`). El **contexto de dibujo dice `fbp=80`** (0x280000) y esa región está
+  **vacía** (bucket 10 = 0); la **presentación** lee `DISPFB1` = `fbp=0` (el default del runtime,
+  `ps2_memory.cpp:578`), que es justo la página con el fade.
+- **Los prims que llegan al GS vienen con RGBAQ = 0** (`[gs:gif] tagHi=0x412 regs=<ST> 0 <XYZ> <ST>`):
+  el juego está pintando **quads negros** (fade), no contenido de escena. Consistente con
+  `[gs:diag] crt1 (fbp=0) rgbNZ=0 aNZ` creciendo. ⇒ el pipeline está bien; **la escena no se produce**.
+- **Cómo entra el tick (`ra` del llamador)**: alterna **`0x51148c`** (`entry_0051147c` → `0x50f750`, el
+  callback de escena) y **`0x510f48`** (`FUN_00510f20` → `0x50f750`, que es la llamada **dentro del lazo
+  de `FUN_00512630`**, `0x512968`). O sea: el tick NO es una invocación del scheduler; es el código del juego.
+- **`[gs-cb]` = 0**: el juego **nunca registra callback de VSync** (`m_gsVsyncCallback == 0`), así que el
+  runtime no encola nada por VBlank; el pacing del juego no viene de ahí.
+- **El lazo de fase casi no itera** (instrumentando el generado de `FUN_00512630`):
+  - `[phase-loop] n=1 flag=0x0 s1=0xa93720 zero=1 nz=0` — **una sola lectura** del flag `*(s1+8)` en 75 s
+    (el contador no llegó a 100k, que era el siguiente log). El flag **nunca** vale ≠ 0.
+  - `[phase-flag-set]` = 0: la escritura `0x51297c: sw $v0(=1), 0x8($s1)` **nunca se ejecuta**.
+    **⚠️ Corrección de un paso en falso propio**: primero escribí acá "0x512978/0x51297c es código muerto
+    (tras el `b 0x512980` de 0x512970)" — **es falso**: el bloque es alcanzable desde
+    **`0x5127ac: bnez $v0, → 0x512978`** (verificado en el ELF y en el generado, `goto label_512978`).
+    Lección: el `b` incondicional no implica inalcanzable; hay que buscar *todas* las ramas al target.
+  - Con `flag == 0` la arista `0x512a6c: beqz $v1 → 0x512674` **vuelve al lazo**: el lazo no puede cerrar
+    por sí mismo. El hilo 1 queda dentro del **cuerpo** (los 9 ticks/s salen de ahí, vía
+    `0x510f20 → 0x51147c → 0x50f750`), y el bucle de frame (`0x51fea0`) no itera → **la fase no avanza
+    al menú** (`gp740/744 = 0`).
+- **Objeto de fase**: `a0` de `FUN_00512630` = `0xa93720` (el que devuelve `0x513370` en el bucle de
+  frame). Su flag en `+8` es la condición de salida del lazo.
+- **Condición de salida, medida** (`[tick-prof]` ahora loguea `phP/ph0/phC`):
+  `FUN_00510EF0` es un **getter**: `return (*(obj+0) != 0) ? 0 : *(obj+0xC)` con `obj = *(gp-0x324)`;
+  ese valor ≠ 0 es lo que lleva a `0x512978` (flag = 1 → sale el lazo).
+  Medido en 75 s: **`phP = 0xc61890`** (¡región de escena `0xC6xxxx`, la misma familia que el
+  `gp+0x740 = 0x00C68C10` del estado de menú real!), **`ph0 = 1 → 2 → 3`** (sube y nunca vuelve a 0) y
+  **`phC = 0` siempre**. ⇒ el lazo **no puede salir**: falta que alguien **limpie `*(0xc61890)`** (o ponga
+  `+0xC`) — el juego está esperando esa señal y no llega.
+
+**Próximo paso (cuarta versión)** — el camino al menú pasa por la fase, no por el render:
+
+1. **Watchpoint real sobre `0xA93728`** (mprotect+SIGSEGV, tipo el viejo `SWORD_WP_WRITER`): enumerar quién
+   escribe el flag del objeto de fase (y quién *debería*). Un watch en `Store32` **no sirve** (artefacto 6).
+2. Con eso, decidir: (a) falta el productor de esa señal (el juego espera algo que no llega) o (b) el
+   runtime nunca ejecuta la ruta que la produce (comparar con savestate: `gp740/744` y la tabla de fases).
+3. Comparar el **estado de fase** recomp vs savestate de la misma fase (`work/teleport/eeMemory.bin`) antes
+   de encadenar más deducciones: el `0xA93728` del recomp no tiene por qué caer en la misma dirección en
+   consola (el heap difiere ~`0x150`), así que comparar por **contenido/estructura**, no por dirección.
