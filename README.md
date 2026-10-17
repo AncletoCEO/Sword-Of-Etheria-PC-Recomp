@@ -49,9 +49,11 @@ Cómo se usó cada una en este proceso:
   `aspec/changes/recompile-sword-of-etheria/`; skills `ancleto-apply` (implementar),
   `ancleto-verify` (verificar) y `cleto-*` en el agente; memoria del proyecto en
   `.ancleto/memory.db`.
-- Modelos de IA: solo se usaron **Big Pickle** y **Muse Spark**, ofrecidos por
-  **OpenCode Zen** (agente OpenCode con las skills de arriba, commits atomizados
-  + push por cada cambio).
+- Modelos de IA: la **generación inicial** de los `.cpp` recompilados (arranque del
+  proyecto) se hizo con **Big Pickle** y **Muse Spark**, ofrecidos por **OpenCode Zen**
+  (agente OpenCode con las skills de arriba, commits atomizados + push por cada cambio).
+  De ahí en adelante el trabajo se hace con **Command Code** (agente) más **Gemini** como
+  consulta externa, a la que se le pasa el contexto del proyecto en el primer mensaje.
 - Recompilador: [PS2Recomp](https://github.com/ran-j/PS2Recomp) (proyecto original, solo
   atribución). **El runtime que se usa y se parchea es el fork
   [AncletoCEO/Ps2Recomp-of-etheria](https://github.com/AncletoCEO/Ps2Recomp-of-etheria)**
