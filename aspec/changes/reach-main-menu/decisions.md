@@ -778,8 +778,39 @@ falta identificar **quién** debe hacer el `SignalSema`/`WakeupThread` y **qué*
   **`phC = 0` siempre**. ⇒ el lazo **no puede salir**: falta que alguien **limpie `*(0xc61890)`** (o ponga
   `+0xC`) — el juego está esperando esa señal y no llega.
 
-**Próximo paso (cuarta versión)** — el camino al menú pasa por la fase, no por el render:
+**2026-10-17 (cuarta ronda) — el freno está en el PAD (barrera 2), con la estructura confirmada contra los `.p2s`**
 
+- **La comparación contra los savestates reales (v65 de Gemini, con el corrimiento de heap `+0x150`)
+  reencuadra el lazo**: en el **menú real** `*(s1+8)` sigue siendo **0** y `*(mgr+0)` vale **4** ⇒
+  `FUN_00512630` **no tiene que salir**: el menú es la **4ª tarea**, que spawnea Task#1 al cambiar su handler
+  de `FUN_00500570` a `FUN_00500490`. Mi lectura previa ("la fase termina cuando el count llega a 0") era
+  **incorrecta**; el count *sube* (3 → 4). Respuesta guardada en `work/gemini/ans_gemini_v65.md`.
+- **Cadena de tareas verificada en nuestro run** (`[task]`, leyendo RAM desde el hook de `0x50f750`):
+  `root=0xcb2710` con `h20=0x5006d0` (init de Task#1, **igual dirección que en PCSX2**) → `h20=0x500570`
+  → count 1→2→3 ✓. El objeto de fase es el mismo que ve `FUN_00512630` (`mgr=0xc61890`).
+- **Barrera 1 (archivo `0x07010000`): se PASA** (`ldSt` 2 → 3 a los ~30 s) ⇒ el freno no es el loader.
+- **Barrera 2 (pad): acá se clava** — `root sub=2` (esperando `FUN_0051c680(0)`) desde ~f=450 hasta el final.
+  - `[pad-e1a0] port=0 state=3` (nunca cambia) y `[pad-state] port=0 ret=0`.
+  - **⚠️ Corrección a la semántica del v65**: leído el generado, `FUN_0051c680` devuelve **0 si el estado
+    del pad es 0 o 3**, 1 si es 4 y 2 si es 1/2/5/6/7/8; el caller espera `!= 0`. (En el real port0 = 6 →
+    pasa.) Nuestro estado es **3**.
+- **`[pad-getstate]` = 0 llamadas**: el juego **no** usa el stub HLE `scePadGetState` (que devolvería
+  `kPadStateStable`). Su estado lo mantiene el **libpad recompilado**, que habla por SIF RPC con
+  **PADMAN.IRX dentro del IOP emulado** ⇒ el estado clavado es de la **capa de plataforma**, no del código
+  del juego.
+- **El runtime NO tiene dispositivo SIO2**: `grep` de los registros SIO2 (`0x1F8082xx`) y de `sio2` en
+  `ps2xIOP`/`ps2xRuntime` no encuentra manejo alguno (sólo el *nombre* del módulo en
+  `iop_module_manager.cpp`). **PCSX2 sí lo tiene** (fuente local en `tools/ps2emu/pcsx2/SIO/Pad/`:
+  `Pad.cpp`, `PadDualshock2.cpp`, …) ⇒ es la referencia para implementar el dispositivo y que padman
+  complete sus comandos (estado del pad → 6 = Stable).
+
+**Próximo paso (quinta versión)** — implementar el dispositivo de pad SIO2 en el fork (capa de
+plataforma): registros SIO2 + protocolo DualShock2 (0x01/0x42/0x43/0x45/0x46/0x47/0x4C/0x4D/0x4F/0x5A),
+guiado por `tools/ps2emu/pcsx2/SIO/Pad/` como **referencia** (PCSX2 es GPL-3.0: portar con criterio y
+atribución, no copiar a archivos MIT). Verificación: `[pad-e1a0] state` → 6, `root sub` → 3 → … → count 4
+y `frame_*.bmp` con RGB ≠ 0.
+
+**Próximo paso (cuarta versión — SUPERSEDED por la quinta de arriba)** — el camino al menú pasa por la fase, no por el render:
 1. **Watchpoint real sobre `0xA93728`** (mprotect+SIGSEGV, tipo el viejo `SWORD_WP_WRITER`): enumerar quién
    escribe el flag del objeto de fase (y quién *debería*). Un watch en `Store32` **no sirve** (artefacto 6).
 2. Con eso, decidir: (a) falta el productor de esa señal (el juego espera algo que no llega) o (b) el
