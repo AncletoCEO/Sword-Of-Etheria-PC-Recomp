@@ -1,6 +1,14 @@
 # Tasks: reach-main-menu
 
 > Estado 2026-10-09. Entrada: **`HANDOFF.md`**. Se podaron las tareas superseded para no inducir a error.
+>
+> ⚠️ **2026-10-17 — este archivo es un LOG POR SESIÓN (histórico).** Las mediciones de cada sesión valen
+> para su fecha. En particular, las líneas que dicen **`vramNonZero=0` / "sigue negro" por falta de
+> dibujo** quedaron desactualizadas: hoy `vramNonZero` sube a **368801/475456**, la geometría **llega al
+> GS** (`[vif1-chain]`, `[gs:kick] drawing=1 pc=0x6e4468`) y el problema es **qué página se presenta**.
+> Fuente vigente: `decisions.md` §2026-10-17 + §"Artefactos de medición".
+> Lo que **sí** sigue válido de acá: el `SWORD_TEST_PATTERN` prueba que **el present funciona** (se ve un
+> gradiente forzado) ⇒ si la pantalla está negra no es el display roto, sino **qué VRAM lee**.
 
 ## Hecho
 

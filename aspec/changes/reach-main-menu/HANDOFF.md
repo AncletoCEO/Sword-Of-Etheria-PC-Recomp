@@ -5,19 +5,38 @@ consolida `decisions.md`. Si algo acá contradice a otro artifact, **vale este**
 
 > ### ESTADO ACTUAL (2026-10-16)
 
+> ⚠️ **CORRECCIONES 2026-10-17 (medidas — detalle en `decisions.md` §2026-10-17 y §"Artefactos de
+> medición").** Tres afirmaciones de este bloque están **desmentidas** y no deben usarse como síntoma:
+> - **"`vramNonZero=0` en corridas reales"** → **falso hoy**: el render escribe VRAM (sube a
+>   368801/475456 palabras). Lo que sigue negro es el frame **presentado**.
+> - **"2 kicks de DMA, los dos vacíos (`qwc=0`)"** → **artefacto**: el juego programa VIF1 en **modo
+>   cadena por `TADR`** (`0x10009030`, `CHCR=0x145`, `mode=(chcr>>2)&3 == 1`) y **nunca** MADR/QWC; el
+>   runtime camina la cadena desde TADR (`ps2_memory.cpp:1600+`). `[vif1-chain]` trae data real
+>   (`qw=177/4/1…`) y `[gs:kick] drawing=1 prim=6/5 pc=0x6e4468` muestra prims llegando al GS.
+> - **"nadie encola geometría (`FUN_006e58b8` sin llamadas de producción)"** → **falso**: sí se ejecuta
+>   (muestras de pc en `0x6e58d4`) y tiene call sites reales (`0x6e7ca0`, `0x6f28c0`, `0x638db0`…).
+>
+> Reencuadre: el **bucle de frame no está "congelado"** (el task update corre a **~9/s**, `[tick-prof]`) y
+> el bloqueador de la pantalla es **qué página se presenta** (`[gs:diag] crt1 (fbp=0) rgbNZ=0 aNZ≈131k`),
+> **no** la falta de geometría.
+
 > - **Único cambio de flujo de la sesión**: fix del **semáforo de completado RPC** en `sifBindRpcStub`
 >   (`game_overrides.cpp`). El stub no creaba el semáforo que el SDK sí crea. Efecto medido: el loader
 >   del hilo 3 **pasó de mudo a emitir RPC** (`client=0xa468f0 rpcNum=0x1`/`0x2`). `init=1` queda como
 >   **shim documentado** (el SDK usa `init=0`; volver cuando el runtime señale el completado de BIOS).
-> - **La pantalla sigue negra.** `vramNonZero=0/4194304` en corridas reales; **2 kicks de DMA, los dos
->   vacíos** (`qwc=0`). Con savestate inyectado dibuja bien (`vramNonZero=29544`): **el renderer está sano**.
+> - ~~La pantalla sigue negra. `vramNonZero=0/4194304` en corridas reales; 2 kicks de DMA, los dos
+>   vacíos (`qwc=0`)~~ **(superado: ver CORRECCIONES arriba)**. Con savestate inyectado dibuja bien
+>   (`vramNonZero=29544`): **el renderer está sano**.
 > - **Cadena medida de punta a punta**: el motor gráfico entra (`[hit-6e4cc0]`, `[hit-6e4848]`), su setup
 >   de boot es correcto, y el flip **sí corre** (probado por `[dma:kick] … ra=0x6e4ebc`, posterior al
->   bloque). `gp+0x638`/`gp+0x63C` son **cursor por frame** y valen 0 porque **no hay paquetes que enviar**.
-> - **Raíz acotada**: **nadie encola geometría** (`FUN_006e58b8` sin llamadas de producción) porque
->   **`FUN_0075b0e0` — la fase del menú — no tiene ni un `jal` en todo el binario**; sólo se alcanza por
->   la tabla `0x95F3D0`/`0x95F3D4`.
-> - **Hallazgo abierto (posible bug del recompilador)**: esa tabla quedó **decodificada como código**
+>   bloque). `gp+0x638`/`gp+0x63C` son **cursor por frame**; **medido 2026-10-17: valen `0xa96688`
+>   (no 0)** y son iguales entre sí ⇒ la cola **está drenada con contenido real**, no vacía.
+> - ~~**Raíz acotada**: **nadie encola geometría** (`FUN_006e58b8` sin llamadas de producción)~~ **(refutado
+>   2026-10-17: sí corre y tiene callers; ver CORRECCIONES arriba)**, porque **`FUN_0075b0e0` — la fase del
+>   menú — no tiene ni un `jal` en todo el binario**; sólo se alcanza por la tabla `0x95F3D0`/`0x95F3D4`.
+> - **Hallazgo abierto (posible bug del recompilador)** *[cerrado: la tabla es **DATOS** y tiene entrada en la
+>   tabla de funciones por el barrido — ver `work/gemini/README.md` caminos muertos 9 y 11; la pregunta válida
+>   es si ocurre la llamada indirecta]*: esa tabla quedó **decodificada como código**
 >   (`throw std::runtime_error("Unhandled SPECIAL instruction")` en `0x95f3c0`/`0x95f3d4`) y tiene
 >   entrada en la tabla de funciones (`// 0x95f3d0`). Hay dos saltos reales hacia ella
 >   (`FUN_009470e0:2852`, `FUN_00953bc8:46643`). Pendiente: hook en `FUN_0095b2a8` para ver si entra.
@@ -125,7 +144,7 @@ siguiente paso. **No es render, no es OS, no es decomp.**
 
 | Env / script | Qué da |
 |---|---|
-| `SWORD_TRACE_BRANCH="<lo>-<hi>"` (hex) | **Trace de control de flujo del recomp** con `tid=`, a `/tmp/sword_branch.log`. **Única vía de ver DENTRO de la mega-función** `0x4eb8d0..0x6cba48`. |
+| `SWORD_TRACE_BRANCH="<lo>-<hi>"` (hex) | **Trace de control de flujo del recomp** con `tid=`, a `/tmp/sword_branch.log`. **OJO (2026-10-17): no flushea** — con pocas transferencias deja el log en **0 bytes aunque haya matcheado**; usar un rango ancho o mirar que el archivo crezca. |
 | `SWORD_CHAIN=1` | Probes del retorno de `0x4d19c8`, `0x4d0cd0`, `0x4d3730`, `0x4cee38`, `0x4cfa80`, `0x4cf860`. |
 | `SWORD_RAM_DUMP=1` | Dumps crudos de RDRAM (32 MB ×8) a `/tmp/sword_ram_N.bin`. |
 | `SWORD_WP_WRITER=1` | **Hook de escritores a `0xC80000–0xE50000`** (`mprotect`+`SIGSEGV`): enumera cada rutina que escribe la región (PC del caller + rango), sin rebuild de los `.cpp` generados. |

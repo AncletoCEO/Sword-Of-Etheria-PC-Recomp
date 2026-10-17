@@ -9,13 +9,21 @@
 ## Reglas / entorno (no re-descubrir)
 
 - Build: `cmake --build work/build-game/out-linux --target sword_etheria -j4` (**-j4**, más = OOM).
+  Usa **Makefiles**: re-escanea dependencias de los ~20 k `.cpp` (~5-6 min en no-op) y recién después
+  compila/linkea (binario ~382 MB).
 - **No editar headers** (`ps2_runtime.h`/`ps2_runtime_macros.h`): 18 k rebuilds. Instrumentar en `.cpp`.
 - Corrida baseline: `SWORD_SIF_SEMA=1 timeout 180 ./work/build-game/out-linux/sword_etheria work/elf/SLES_537.68`
-  → `vbprof n≈10681/180 s`, `gif=2`, `nonZeroRgb=0`, `vramNonZero` 0/306048/524288.
-- El código del juego en **`0x4eb8d0..0x6cba48` es UNA mega-función** (`FUN_004eb8d0`); `0x6cba48..` otra.
-  El runtime **reemplaza cada slot del rango por la mega-función** ⇒ `replaceFunction` sobre un slot de ahí
-  **no tiene efecto**. Para ver el flujo interno: `SWORD_TRACE_BRANCH` (runtime) o instrumentar la mega.
-- `[triage-sema]` está **rate-limitado** (sus conteos no son representativos).
+  → medido 2026-10-17: `vbprof n≈10 600`, `nonZeroRgb=0`, **`vramNonZero` sube a 368801/475456** (ya NO es
+  "0 en corridas reales": el render escribe VRAM), ≈**9 ticks/s** del task update (`[tick-prof]`).
+- El código del juego en **`0x4eb8d0..0x6cba48` era UNA mega-función** (`FUN_004eb8d0`); `0x6cba48..` otra, y
+  el barrido reemplazaba cada slot del rango (⇒ `replaceFunction` dentro del rango no tenía efecto).
+  **CORREGIDO 2026-10-17: el generado ya está dividido** — `register_functions.cpp` mapea cada dirección a su
+  propia función (`0x512630`→`FUN_00512630_0x512630`, `0x51fea0`→`FUN_0051fea0_0x51fea0`) y
+  `FUN_004eb8d0_0x4eb8d0.cpp` tiene 4 KB (no contiene el código del rango). Los hooks sobre funciones
+  completas del rango **sí disparan** (`[frame1]`, `[frame-loop]`, `[phase-hook]`). Antes de dar por inerte un
+  hook: mirar `register_functions.cpp` y `hasFunction`.
+- `[triage-sema]` está **rate-limitado** (sus conteos no son representativos). Igual que `[dma:kick]`.
+- **Un log de síntoma puede ser artefacto**: ver §"Artefactos de medición" al final del archivo.
 - Syscalls: `0x32`=SleepThread, `0x33`=WakeupThread, `0x40`=CreateSema, `0x42`=SignalSema, `0x44`=WaitSema.
 
 ---
@@ -694,3 +702,32 @@ falta identificar **quién** debe hacer el `SignalSema`/`WakeupThread` y **qué*
    (¿thread 3 en `0x628948` + RPC `sid=0x573`?). Medir con el `vsync=` que ahora tienen las trazas RPC.
 3. Revisar (con la lente de esta sesión) **todo dato de log que se haya usado como síntoma**:
    `madr/qwc` en el kick, "RETURN" del wrapper, y logs vacíos por falta de flush.
+
+---
+
+## Artefactos de medición (2026-10-17) — logs que MINTIERON y por qué
+
+> Costaron varias hipótesis falsas (propias y de sesiones previas). **Antes de concluir de un log,
+> verificar el instrumento**: qué mide exactamente, cuándo se emite y qué convención tiene el generado.
+
+1. **`[frame-loop] … RETURN n=1 raOut=0x5129e4`** ⇒ en realidad era un **YIELD**. El wrapper leía
+   `ctx->r[31]` después de `ORIG(...)` sin mirar `ctx->pc`; el generado hace `return` desde el cuerpo
+   (aristas hacia atrás con `eeCheckpointDue`, y `dispatchGuestBranch` → `false` en el checkpoint previo a
+   una llamada, `ps2_runtime.cpp:1440`). En un yield, `$ra` es sólo el retorno del último `jalr` interno.
+   ⇒ **Corregido**: el wrapper loguea `pcIn/pcOut/spIn/spOut/dsp` y sólo dice `RETURN` si
+   `pcOut == retorno esperado`. Ese log falso sostuvo la "causa raíz" del `$ra` equivocado.
+2. **`/tmp/sword_branch.log` vacío** ⇒ en realidad **no hubo flush**. El `static std::ofstream` del
+   `SWORD_TRACE_BRANCH` nunca se flushea y `timeout` mata con SIGTERM: con pocas transferencias quedan 0
+   bytes *aunque haya matcheado* (el archivo existe, se creó al construirse el stream). ⇒ usar un rango
+   ancho (miles de líneas) o agregar flush. **No concluir "no pasó" de un log vacío.**
+3. **`[dma:kick] … madr=0x0 qwc=0x0`** ⇒ en realidad es **modo cadena**: el juego escribe `TADR`
+   (`0x10009030`) + `CHCR=0x145` (`mode=(chcr>>2)&3 == 1`) y **nunca MADR/QWC**, que en ese modo no se
+   usan. El runtime camina la cadena desde TADR (`ps2_memory.cpp:1600+`). ⇒ el `[dma-reg]` (auditoría de
+   escrituras a los registros de canal DMA, dedup por valor) es la fuente correcta. **`qwc=0` NO significa
+   "no transfiere nada"**: `[vif1-chain]` y `[gs:kick] drawing=1 … pc=0x6e4468` muestran data llegando al GS.
+4. **Logs rate-limitados** (`n<=25`, `%500`, `%600`): un corte no es una distribución. `[dma:kick]` estuvo
+   así y de ahí salió el "2 kicks vacíos" del 2026-10-16. Ahora resume con `withData=`.
+5. **Snapshots del scheduler (`[triage-vbprof]`, `[tick-prof]`)**: el `pc` publicado para un hilo es el de
+   su **último safe point**, no el que tiene vivo el hilo en ese instante; y para invocaciones del scheduler
+   (`pc=0` = "invocación terminada", ver `RPC.cpp:777` `SET_GPR_U32(...,31,0)`) publican ese 0. No leer
+   `pc=0` como "el hilo murió" sin más.
