@@ -1081,7 +1081,6 @@ contra el descriptor real (`eeMemory.bin`, `*($s0+0x1B4)` → `0x00e89668`). Hip
 VRAM" en el nodo que saltea las 10 páginas restantes.
 
 **2026-10-17 (decimoséptima ronda) — el gate de la subida de texturas, identificado a nivel instrucción**
-
 - **Arreglado el flush del trace** (`s_out.flush()` en `ps2_runtime.cpp`, junto al `<<` de `[SWORD_TRACE_BRANCH]`):
   antes un trace de pocas líneas quedaba **vacío en disco**.
 - **`FUN_006efd28` (el uploader real) se entra UNA vez**, desde `src=0x6f0bc4` (dentro de `FUN_006f0a38`) ⇒ el
@@ -1115,6 +1114,63 @@ VRAM" en el nodo que saltea las 10 páginas restantes.
   `func_51EF60` con `a2=0x20/a3=0x203` y por qué no completa para las otras 10 páginas?; (d) el objeto
   `0x00A887C8` y sus globals `gp-0x7E18`/`gp-0x7E14`/`0xA42514`/`0xA42518` son el estado del gestor ⇒
   compararlos contra el real (`eeMemory.bin`) para ver en qué se diferencian.
+
+**2026-10-17 (decimoctava ronda) — el estado del gestor de texturas es BYTE-IDÉNTICO al real**
+
+- `func_6D5980` (el gate) también se llama **una sola vez** (desde `0x51f4d8`, dentro del runner).
+- `FUN_0051f450` (el runner) se entra **una sola vez**, y su caller `FUN_00512ab0` (`0x512ab0`–`0x513160`) lo
+  llama **incondicionalmente al principio** (`0x512ab8..0x512ac8`) ⇒ no hay gate en el call site: el gate es
+  *cuántas veces se entra* a `FUN_00512ab0` / al runner.
+- **Comparación contra el real (dos volcados de 32 MB: `/tmp/rdram_late.bin` nuestro, tick 1200, vs
+  `work/teleport/eeMemory.bin` del menú real)**:
+  - objeto gestor **`0x00A887C8`** ⇒ `IGUAL` (incluida su vtable: slot `+4` = `0x006f0a38`, y los métodos
+    `0x006fd a80`, `0x006fa768`, …);
+  - globals **`gp-0x7E18`/`gp-0x7E14`** (`0xA20258`/`0xA2025C`) ⇒ `IGUAL`;
+  - **`0xA42514`/`0xA42518`** (los `sw` de `0x51f534`/`0x51f540`) ⇒ `IGUAL`;
+  - ventana de 128 bytes desde `0xA887C8` ⇒ **128/128 bytes idénticos**.
+- ⇒ **La lógica del juego llegó exactamente al mismo estado que el real.** El atlas que falta **no** se explica
+  por un gestor roto, ni por punteros/estado desincronizados, ni por un `rgba` de vértice. Las dos hipótesis
+  vivas: **(i)** en el real el atlas se subió **antes** (fase de boot/logo) y quedó en VRAM (un volcado de VRAM
+  es acumulativo), y el pase que vemos es sólo el del menú — nuestro VRAM nunca tuvo esas páginas ni en el dump
+  temprano (`#300`, ya con 0 en 321–330); **(ii)** el pase de subida debe **repetirse** (una textura por
+  invocación) y en nuestro run se invoca una sola vez (el gestor está *idle* en ambos, así que el disparador de
+  la repetición **no** está en el objeto gestor).
+
+**Próximo paso (decimonovena ronda)** — discriminar (i) vs (ii):
+1. **Dump de VRAM temprano** (p. ej. present #10) para ver si el atlas aparece *alguna vez* en nuestro run
+   (si nunca aparece ⇒ (i) es falsa y el pase debe repetirse ⇒ (ii)); ya tenemos dump configurable en
+   `SWORD_DUMP_VRAM=<ruta>` (hoy en #300/#900/#1500: agregar #10, o un valor de "cada N").
+2. **Contar entradas a `FUN_00512ab0`** (`SWORD_TRACE_BRANCH=512ab0-512ab1`): si es 1 ⇒ su caller es el gate
+   real (leer su condición) y hay que ver por qué el juego no vuelve a ejecutar el bloque de arranque.
+3. Leer `func_6D5980` (qué "trabajo" consulta) y `func_51EF60` (`a2=0x20`, `a3=0x203`, dos punteros de `gp`) —
+   la API del gestor — y comparar *esos* datos si el disparador no está en el objeto.
+4. En paralelo: comparar por **contenido** (no por dirección, el heap está corrido +0x150) el resto de las
+   estructuras del loader/task4 contra el real, para descartar que falte una cola de assets.
+
+**2026-10-17 (decimonovena ronda) — el pase de subida es de *startup* y la cola tenía UN solo asset listo ⇒ el eslabón es el LOADER**
+
+- **`FUN_00512ab0` (0x512ab0–0x513160) se entra UNA vez**, desde `src=0x51fee8` = la función de entrada del juego
+  (`entry_0051f4f8`) ⇒ todo el camino (runner → gate → la subida) es un **pase de arranque**, no parte del lazo
+  de frame (el lazo `FUN_00512630`, que hace *yield*, se entra después desde dentro de esta misma función).
+- **El bloque del runner es un *bucle* sobre el gestor**: `0x51f544: bnez $v0 → 0x51f564` ⇒ la secuencia
+  "consultar trabajo (`func_6D5980`) → preparar → subir (opcode 2) → reaccionar" **itera mientras el gestor
+  diga que hay trabajo**. En nuestro run ejecutó **una** vez y paró ⇒ **en ese instante la cola tenía un único
+  asset listo** (el de la primera textura), y como el pase es de *startup*, los que estuvieran listos *después*
+  ya no se procesan.
+- **Diff completo de 32 MB** (nuestro tick 1200 vs `eeMemory.bin`): 7,78% de palabras distintas, pero el
+  desglose es *esperado*: (a) las zonas de **código** del juego están en cero en nuestra RAM (el runtime usa el
+  código recompilado, no ejecuta el del guest) — esto explica los clusters grandes y ruidosos de la zona baja;
+  (b) el **heap** corrido +0x150; (c) una **lista enlazada poblada en el real y vacía en nosotros** (nodos cada
+  `0x4C` desde `0x1AD7C`, con `prev`/`next` y un auto-puntero en `+0x4C`; head autorreferente en `0x1A260`):
+  patrón de **tabla de descriptores de E/S del guest** (iomanX/loader) ⇒ **artefacto de HLE** (nosotros
+  interceptamos el file I/O y esas estructuras del guest quedan sin poblar), no una diferencia de estado del
+  juego. **El objeto gestor de texturas sigue siendo byte-idéntico al real.**
+- **Conclusión del hilo de texturas**: no es el GS (probado byte a byte), no es el estado del gestor (idéntico),
+  no es el código de dibujo ⇒ **es la *readiness del loader de assets* en el momento del único pase**.
+  Próximo paso natural: instrumentar **qué assets pide el juego al loader y cuáles quedan sin completar**
+  (los `[ld-*]`/SIF/RPC ya existen; comparar la *cola* del loader y las respuestas del lado IOP/SIF), y en
+  particular si hay un asset de *atlas de interfaz* que nunca se completa (el loader quedó en `state=3` para 6
+  assets, pero puede faltar el que trae los texeles PSMT8 de las pages 321–330).
 
 
 
