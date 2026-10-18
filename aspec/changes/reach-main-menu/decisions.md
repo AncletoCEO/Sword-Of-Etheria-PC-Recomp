@@ -906,12 +906,31 @@ falta identificar **quién** debe hacer el `SignalSema`/`WakeupThread` y **qué*
   ⇒ **El bloqueo ya no está en la lógica de tareas ni en la carga**: está en el **render** (quién recorre el
   draw tree `+0x5C` / la capa 2D / el fade-in `*(gp-0x33C)` vtable+0x5C) o en la presentación.
 
-**Próximo paso (décima versión)** — instrumentar el **pase de dibujo**: (a) quién recorre `*(Task#4+0x5C)`
-y con qué virtuales (log de las llamadas indirectas desde el caminador de la lista de dibujo), (b) el fade
-`*(gp-0x33C)` vtable `+0x5C` (valor del fade por frame) y (c) si el controlador `0xe89a10` recibe su virtual
-de dibujo. Comparar con el real: en `eeMemory.bin` el mismo camino existe con datos (sólo cambian las
-direcciones). Buen momento para el **v68** (el grafo está completo: la pregunta pasa a "¿qué recorre el draw
-tree y qué lo gatea?").
+**2026-10-17 (décima ronda) — el pipeline 2D corre hasta el encolado; el hueco es la etapa 3 (flush)**
+
+- **v68 de Gemini (guardado en `work/gemini/msg_gemini_Responsev68.md`)**: el planificador por frame es
+  `FUN_00511430 → FUN_0050f750(task)` (handler `+0x20` y después traversal **incondicional** de
+  `*(task+0x5C)` vía `FUN_0050d8d0`); la submission 2D es `$s0->vtbl[+0x154]` = **`FUN_00506af0`** →
+  `FUN_00743568(*($s0+0xC0))` → los **16 hijos** del layout (`Child[i]->+0x48` = `FUN_00743268`) →
+  `FUN_00702890(queue, child, 1)`; y el flush = `FUN_00754398` / `FUN_0075ccc8` / `FUN_0070b868`.
+- **Medido con traces (`SWORD_TRACE_BRANCH`, sin rebuild)**:
+  - Rango UI (`0x500000-0x520000`): `FUN_00506a70` ×189, **`FUN_00506af0` ×189**, `FUN_0050d8d0` ×413,
+    `FUN_00511430` ×240, `FUN_0050f750` ×938, y **`tgt=0x743568`/`0x743268` ×189** ⇒ el *dispatch* de dibujo
+    2D, el traversal y el emit por hijo **sí corren** (y con eso, el guard `*($gp-0x34C) != 0` **pasa**).
+  - Rango flush (`0x700000-0x760000`): `FUN_00743568` ×102, `FUN_00743268` ×394, `FUN_00702890` ×394 y
+    **`FUN_006e58b8` (el enqueue de geometría) ×394** ✓✓ — o sea **los sprites del menú SÍ se encolan**
+    (~6,6/s = al ritmo del tick de ~9/s, no por VBlank). En cambio **`FUN_00754398` = 0 y
+    `FUN_0070b868` = 0** llamadas, y `FUN_0075ccc8` sólo **4** ⇒ **la etapa 3 (flush/emisión) no corre**.
+- **Dato del savestate**: `*(gp-0x34C)` en el menú real es **`0x00cb50d0`** (un **puntero**, no un flag 0/1)
+  ⇒ el guard es "puntero ≠ 0" y en nuestro run pasa (el traversal llegó a `FUN_00743568` ×189).
+- Consecuencia: el bloqueo ya no es "no hay geometría" ni "no hay productor": **la cola 2D se llena pero no
+  se vacía al GS**. Es un problema de **flush/emisión** (o de que el flush corre en una fase/thread que no
+  se ejecuta en nuestro scheduler).
+
+**Próximo paso (undécima versión)** — instrumentar la **etapa 3**: quién debería llamar a `FUN_00754398` /
+`FUN_0070b868` / `FUN_0075ccc8` (¿el final del frame, un VSync, el `0x6e4cc0`/flip?), y si el flush ve la cola
+con ítems. Comparar con el real (`eeMemory.bin`: la cola `0xA887B8`/`0xA370D0` tiene ítems ✓).
+
 
 **Próximo paso (cuarta versión — SUPERSEDED por la quinta de arriba)** — el camino al menú pasa por la fase, no por el render:
 1. **Watchpoint real sobre `0xA93728`** (mprotect+SIGSEGV, tipo el viejo `SWORD_WP_WRITER`): enumerar quién
