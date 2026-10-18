@@ -949,6 +949,30 @@ setter `*(gp-0x33C)` vtable `+0x5C`, o el alpha del quad del fade en los `[gs:gi
 Si el fade no baja a 0, hay que ver **quién debería bajarlo** (un contador por frame / un VBlank) y por qué no
 avanza en nuestro run.
 
+**2026-10-17 (duodécima ronda) — el fade está bien; el problema es que lo dibujado no tiene color (página/alpha)**
+
+- **Fade: refutado mi hipótesis.** `*(gp-0x33C)` = objeto del motor (su vtable está en `+0x1C` = `0x9f45c0`;
+  el slot `+0x5C` = `0x58f0c0`), y `FUN_00512630` le llama el virtual **`+0x30` 3×/tick** con
+  `f12 = *(gp-0x320)` (la tasa; 0.02 = 1/50 ⇒ 0.5 s). El virtual es un *avance* (hoja `0x591b90`:
+  `*(a0+8) += min(delta,0.25)`), y medido por tick **`*(engine+8)` avanza 0 → 0.04 → 1.18 → 1.2** ⇒
+  **el fade termina** (en el menú real vale 3.115, >1, igual criterio).
+- **Página presentada vs dibujada**: el contexto de dibujo es **página 80** (`ctx=80/8/0`; su contenido:
+  `per256K=[10]=3119`) y la presentación lee **página 0** = el **default del runtime** (`DISPFB1=0x1400`,
+  `ps2_memory.cpp:578`). Los registros del real (`work/teleport/GSregs.bin`, con `PMODE=0x8067` ✓ que
+  confirma el layout) dan `DISPFB1 = 0x00080080` ⇒ **FBP = 0x80 = 128** ⇒ el real presenta una página
+  concreta, no la 0. Es el lead que este archivo ya anotaba el 2026-10-11 ("falta fijar el fbp de display").
+- **Matiz decisivo**: nuestro `Present` **ya** intenta fallback a los `contextFrames` cuando la página del
+  display está negra, y **no la elige porque el contenido de la página 80 también es alpha-only (RGB=0)**.
+  ⇒ el problema no es sólo *qué página* se lee: **lo dibujado no tiene color** (el frame presentado queda
+  `rgbNZ=0` con `aNZ=286720 = 640×448`, o sea la pantalla entera con alpha y sin RGB).
+- Referencia visual del objetivo: **`work/teleport/state_menu.png`** = el menú real ("Select video format…
+  NTSC(60Hz) / PAL(50Hz)").
+
+**Próximo paso (decimotercera versión)** — atacar el **color de lo dibujado**: loguear el payload de los
+prims del *menú* (los `prim=6` = `GS_SPRITE` y los `tme=1` = texturizados) con el probe `[gs:gif] … regs=`
+ya existente, para separar "el color que manda el juego es 0" de "la textura/`tmem` está vacía" de "el blend
+lo apaga". Si hace falta, comparar el `tmem`/`TEX0` de esos draws contra el savestate.
+
 
 **Próximo paso (cuarta versión — SUPERSEDED por la quinta de arriba)** — el camino al menú pasa por la fase, no por el render:
 1. **Watchpoint real sobre `0xA93728`** (mprotect+SIGSEGV, tipo el viejo `SWORD_WP_WRITER`): enumerar quién
