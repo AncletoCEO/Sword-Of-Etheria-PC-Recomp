@@ -1172,6 +1172,46 @@ VRAM" en el nodo que saltea las 10 páginas restantes.
   particular si hay un asset de *atlas de interfaz* que nunca se completa (el loader quedó en `state=3` para 6
   assets, pero puede faltar el que trae los texeles PSMT8 de las pages 321–330).
 
+**2026-10-17 (vigésima ronda) — el gate es un flag, y en el gestor hay una LISTA que en el real tiene 6 objetos y en nosotros está en cero**
+
+- **El gate, leído:** `func_6D5980` hace `$s2 = 0xA887B8` (base del gestor), `$v0 = *(0xA888DC)`, `$v0 ^= 1`,
+  `$s0 = ($v0 < 1)` y `beqz $s0` ⇒ **"hay trabajo" se decide por el flag `*(0xA888DC)`**. Medición: vale **3 en
+  ambos** (nuestro dump y el real) ⇒ **no** es la diferencia.
+- **Layout del gestor `0xA887B8`**: `+0x8` = contador (`0xA887C0`), `+0x10` = vtable (`0xA887C8`, slot `+4` =
+  `0x006f0a38`), `+0xBC` = **centinela de lista** (`0xA88874`), `+0x124` = flag del gate (`0xA888DC`),
+  `+0x128` = `sw $s2` de `0x6d5b60`.
+- **La diferencia real, comparando la ventana entera**: sólo 3 palabras difieren entre nuestro dump tardío y
+  `eeMemory.bin`:
+  - `0xA887C0`: **345 vs 629** (contador; muy probablemente de tiempo/frames ⇒ no concluyente),
+  - **`0xA88874`/`0xA88878` (centinela de la lista): `0x00A88874`/`0x00A88874` (auto-punteros = lista vacía en
+    nosotros, y además los slots `+8/+0xC/+0x10` en 0) vs `0x00CB5818`/`0x00E8C058` en el real** ⇒ en el real
+    el centinela tiene **la vtable de la clase** (`+8 = 0x004c6568`, `+0xC = 0x004cb430`, `+0x10 = 0x004c6c20`)
+    y una **lista doblemente enlazada con 6 nodos** (`0xE8C058 → 0xE8C2D8 → 0xE8C558 → 0xE81F18 → 0xCB6028 →
+    0xCB5818`, con floats `0x3F800000` = 1.0 y `0x3F7FFFFF` en `+8`) — objetos con *transforms/floats* (UI ✓),
+    no texturas.
+- **El centinela nunca se escribe en nuestro run**, y eso está *medido*: el watchpoint de escritura
+  (`SWORD_WP_WRITER`, implementado con `mprotect`+SIGSEGV, **no es ciego**: atrapa también `FAST_WRITE32`)
+  vigiló 2 páginas que cubren `0xA88874`/`0xA888DC` durante 100 s y capturó **0 escritores**.
+- **Cadena del "instalador" (para contextos)**: `FUN_006d5ad0` construye si el flag está en 0
+  (`0x6d5b58: lw $v0, 0x124($s0)` → `bnez`, y en el delay slot `sw $s2, 0x128($s0)`) y llama a
+  **`FUN_006d13a0`** (batch de instalación de vtables: arma `0x4c6568`, `0x4cb430`, `0x4c6c20`, `0x4c71d8`,
+  `0x4c6818`, `0x4c6e70`, … con `lui 0x4C/0x6D` + `addiu`). **`FUN_006d13a0` sí corre (1 vez, desde
+  `0x6d5b64`)** ⇒ instala tablas *globales*, pero **no** escribe el centinela de `0xA88874` ⇒ la
+  construcción/enlace de la lista es de **otra** función que en nuestro run no se ejecuta.
+- **Trampa nueva (importante para futuros watchpoints)**: `wpInstall` redondea el inicio **hacia arriba**
+  (`(base + lo + 0xFFF) & ~0xFFF`), así que `SWORD_WP_WRITER=a88000-a8a000` vigila **desde `0xA89000`** y deja
+  afuera la página de `0xA888DC` ⇒ **dar siempre una página de margen** (p. ej. `a87000-a8a000`).
+
+**Próximo paso (vigesimoprimera ronda)** — encontrar quién construye/enlaza los 6 objetos de esa lista:
+1. Trazar la **entrada** de las funciones del cluster de la clase (`0x6d6290`, `0x6d6310`, `0x6d6390`,
+   `0x6d6410`, `0x6d6490`, `0x6d6510`, `0x6d67a8`, `0x6d68a0`, `0x6d6a80`, `0x6db0d0`) y ver cuáles **no** se
+   ejecutan en nuestro run (mismo método que reveló el gate del uploader).
+2. Comparar la *cadena de nodos* del real (direcciones de heap) contra nuestro dump para ver si los objetos
+   existen (desenlazados) o no existen; recordar el corrimiento **+0x150** del heap, así que comparar **por
+   contenido** (floats `0x3F800000`, tamaño 0x280 entre nodos) y no por dirección.
+3. Con la función que *enlaza* identificada, trazar sus llamadores hacia arriba hasta el punto donde el flujo
+   de nuestro run diverge del real (ahí está la causa raíz de que el menú salga sin color).
+
 
 
 **Próximo paso (cuarta versión — SUPERSEDED por la quinta de arriba)** — el camino al menú pasa por la fase, no por el render:
