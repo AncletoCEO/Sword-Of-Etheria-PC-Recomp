@@ -1012,6 +1012,30 @@ avanza en nuestro run.
 rango de PATH3/GIF (`0x10003000-0x10007000`, con valor y `pc`), en un run corto. Si aparece actividad ahí, el
 hueco es el **FIFO/PATH3 directo** (implementarlo); si no, el uploader del juego no corre y hay que ver su gate.
 
+**2026-10-17 (decimoquinta ronda) — el juego SÍ sube texturas, pero no el atlas PSMT8 ni el CLUT que los sprites muestrean**
+
+- **Probe nuevo `[gs-reg]`** (toda escritura de registro GS por A+D, deduplicada): el juego escribe
+  `BITBLTBUF/TRXPOS/TRXREG/TRXDIR` ⇒ **sí hace subidas** ✓ (y también `DISPFB2`/`DISPLAY2`, `TEX0`, `TEXA`,
+  `FRAME`, `ZBUF`, `ALPHA`, `TEST`, `SCISSOR`, `XYOFFSET`, `PRIM`, `RGBAQ`, `ST`, `UV`, `XYZF2`…).
+  `m_privRegs` **es** el mismo `gs_regs` que escribe el EE (`m_gs.init(..., &m_memory.gs())`) ⇒ no hay dos
+  copias (se descarta ese bug).
+- **Probe `[gs-upload]`** (cada `TRXDIR` con destino/formato/tamaño): se hacen **5 subidas**, TODAS
+  `dir=0` (host→local ✓ = subidas reales) a **`dbp=10240` (page 80 = 0x280000), `dpsm=0` (PSMCT32)** con
+  tamaños 32×32, 16×16, 8×8, 8×4, 16×16 ⇒ ~5,5 KB de imágenes *chicas de color directo*.
+- **Y lo que dibujan los sprites**: los **12** draws texturizados (`[gs:content]`) son idénticos:
+  `prim=4 tme=1 tex0(tbp0=10240 tbw=2 psm=19 tw=6 th=6) uv=(13312,15072) rgba=(0,0,0,0)` ⇒ muestrean una
+  textura **PSMT8 (psm=19) de 64×64** (`tbp0=10240` = **la misma page 80**) ⇒ **leen como índices lo que se
+  subió como PSMCT32**, y **no hay ninguna subida de CLUT** (ninguna a un `dbp` de paleta ni con `dpsm`
+  indexado) ⇒ los texeles resuelven a negro (y el `rgba` del vértice ya es 0) ⇒ **sprites negros** ✓ = el
+  síntoma.
+- Resumen del eslabón: **falta la subida del atlas PSMT8 (64×64) y de su CLUT**; el resto del pipeline
+  (carga de assets, tareas, encolado, VU1/GS, fade, presentación) está medido y sano.
+
+**Próximo paso (decimosexta versión)** — ir a Gemini (v69) con esto: *¿cómo sube este motor el atlas PSMT8 y su
+CLUT (qué función/recurso, p. ej. el handle `*($s0+0x1B4)` / `0x65216110`), y qué lo gatea?* En paralelo:
+loguear el `TEX0` completo (`cbp`/`cpsm`/`csa`) de esos 12 draws para saber si la *paleta está declarada* pero
+no subida (uploader roto) o si el juego directamente no la sube.
+
 
 
 **Próximo paso (cuarta versión — SUPERSEDED por la quinta de arriba)** — el camino al menú pasa por la fase, no por el render:
