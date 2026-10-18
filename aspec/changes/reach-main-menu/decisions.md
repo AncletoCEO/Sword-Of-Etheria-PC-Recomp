@@ -986,11 +986,32 @@ avanza en nuestro run.
   runtime, `fbp=0`; el real tiene `DISPFB1 = 0x00080080` ⇒ FBP=128, la misma página en la que el probe ve
   dibujar los prims). El único eslabón faltante es **la textura**.
 
-**Próximo paso (decimocuarta versión)** — atacar el **camino de subida de texturas** (GIF IMAGE / PATH3):
-instrumentar en `ps2_memory.cpp` el handler de cadenas del canal GIF (`tryProcessNativeGifImageUploadChain` /
-`tryProcessNativeGifPackedChain`, que son **heurísticas de forma de cadena**) para ver **qué cadenas manda el
-juego** y por qué no se consumen como IMAGE; y ver si `sceGsExecLoadImage`/el uploader del juego es
-recompilado o HLE. Verificación del hito: aparece `flg=2` en los logs y `[gs:diag] crt1 rgbNZ > 0`.
+**2026-10-17 (decimocuarta ronda) — el juego no *emite* ninguna subida de textura (ni por la vía nativa ni por el SDK)**
+
+- **`writeGifChain` (el helper del runtime que intenta las heurísticas nativas `tryProcessNativeGifImageUploadChain`
+  y `tryProcessNativeGifPackedChain`, `ps2_runtime.cpp`≈2650) NUNCA se llama** — instrumentado el entry de la
+  heurística IMAGE y el call site: **0 líneas**. ⇒ el tráfico GIF del juego entra por el camino **genérico** de
+  `PS2Memory` (walk de la cadena por TADR, `mode=(chcr>>2)&3 == 1`) → `m_pendingGifTransfers` /
+  `processGIFPacket` del frontend del GS, **que sí sabe manejar IMAGE** (`tryProcessNativeImageUploadPacket`) ⇒
+  si el juego mandara un tag `flg=2`, lo veríamos. **No manda ninguno** (48/48 `flg=0`).
+- **Los stubs de carga de imagen existen y NO son no-ops** (`sceGsExecLoadImage` en `GS.cpp:593` arma el packet
+  completo con el setup A+D; `sceGifPkRefLoadImage` en `:474` también) ⇒ no es que los pisemos con un stub vacío.
+- **El juego no llama al cargador del SDK**: trace sobre la región GS/DMA del SDK (`SWORD_TRACE_BRANCH=4d0000-4d4000`,
+  132k líneas) ⇒ lo que llama es **sincronización** (`0x4d3190` GetThreadId ×83 363, `0x4d32e0` WaitSema
+  ×43 949, `0x4d32c0` SignalSema ×3 130 — el busy-spin), algunos **DMA** (`0x4d19c8` ×62, `0x4d1a60` ×3) y
+  `0x4d3730` (sceGsSyncV) ×62; **nada de image-load**.
+- **Dos candidatos** para la subida que falta:
+  (a) el **uploader del juego** (arma sus propios paquetes) está *gateado* (flag/caché de tmem) y no corre; o
+  (b) sube por **PATH3 directo** (registros `GIF_TAG0..3 = 0x10003040+`, `GIF_CNT/P3CNT/P3TAG = 0x10003080/90/A0`
+      o el **FIFO `0x10006000`**) — y el runtime **no maneja esos registros** (grep: cero referencias) ⇒ los
+      guardaría en `m_ioRegisters` y los ignoraría en silencio.
+  (Los literales de esas direcciones no aparecen en el generado, pero —regla conocida— una escritura por
+  dirección **calculada** no aparece como literal.)
+
+**Próximo paso (decimoquinta versión)** — decidir (a) vs (b): loguear en `PS2Runtime::Store32` las escrituras al
+rango de PATH3/GIF (`0x10003000-0x10007000`, con valor y `pc`), en un run corto. Si aparece actividad ahí, el
+hueco es el **FIFO/PATH3 directo** (implementarlo); si no, el uploader del juego no corre y hay que ver su gate.
+
 
 
 **Próximo paso (cuarta versión — SUPERSEDED por la quinta de arriba)** — el camino al menú pasa por la fase, no por el render:
