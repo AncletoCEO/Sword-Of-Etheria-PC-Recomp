@@ -1072,13 +1072,49 @@ tardío) y `work/teleport/diff_vram.py` (comparación reproducible).
   #300/#900/#1500** y las subidas caen entre #300 y #830 ⇒ hay que usar el dump tardío; (c)
   **`SWORD_RDRAM_DUMP_LATE` (tick≥1200) no disparó** en los runs cortados con `timeout`.
 
-**Próximo paso (decimoséptima versión)** — encontrar el gate del *driver* de texturas del juego:
+**Próximo paso (decimoséptima versión)** — encontrar el gate del *driver* de texturas del juego: **(HECHO: gate identificado a nivel instrucción, ver decimoséptima ronda.)**
 (1) arreglar el flush del trace (`std::unitbuf`/`flush()`) y trazar la **entrada** a `0x6f0a38` y `0x6efd28`
 (capta el `src` = el `jalr` del controlador y el bucle que debería recorrer las 11 páginas); o
 (2) volcar en cada subida los campos del **nodo** (`+0x28/+0x30/+0x37`) y el global **`gp+0x654`**, y compararlos
 contra el descriptor real (`eeMemory.bin`, `*($s0+0x1B4)` → `0x00e89668`). Hipótesis a falsar:
 (a) cola de subidas paginada esperando una confirmación de DMA/VBlank que nunca llega; (b) flag "residente en
 VRAM" en el nodo que saltea las 10 páginas restantes.
+
+**2026-10-17 (decimoséptima ronda) — el gate de la subida de texturas, identificado a nivel instrucción**
+
+- **Arreglado el flush del trace** (`s_out.flush()` en `ps2_runtime.cpp`, junto al `<<` de `[SWORD_TRACE_BRANCH]`):
+  antes un trace de pocas líneas quedaba **vacío en disco**.
+- **`FUN_006efd28` (el uploader real) se entra UNA vez**, desde `src=0x6f0bc4` (dentro de `FUN_006f0a38`) ⇒ el
+  packet único lleva las 5 sub-rectángulos de *esa* textura (por eso vimos 5 `TRXDIR`).
+- **`FUN_006f0a38` se entra 54 veces** por llamadas **indirectas** (`kind=3`, `jalr` por slot de objeto) desde
+  `0x6d54b0/0x6d5520/0x6d5590/0x6d5810/0x6d5880/0x6d5e20/0x6d5eb4` con **opcode en `a0`**:
+  `0,2,4,5,6,7,0xa,0xb,0x11,0x16` (39× el 6). Es un **dispatcher por comando**, no un bucle de subida.
+- **El opcode que sube es `a0=2`**: en el log temporal, la línea inmediatamente anterior a la única entrada al
+  uploader es `src=0x6d5810 tgt=0x6f0a38 kind=3 a0=0x2` ⇒ **el juego emitió "subir textura" una sola vez**.
+- **Cadena del emisor**: `0x6d5810` está en `FUN_006d57e8` (wrapper: `$s1 = 0x00A90000-0x7838 = 0x00A887C8`;
+  `$v0 = *($s1+4); jalr $v0` con `a0=2`) ⇒ **`0x00A887C8` es el objeto gestor de texturas** y su **slot `+4`** es
+  el dispatcher `FUN_006f0a38`. Su único caller directo es **`0x51f53c`, dentro de `FUN_0051f450`** (el runner de
+  fase, el mismo que llama al frame-loop `FUN_00512630`).
+- **EL GATE (`FUN_0051f450`)**: todo el camino de subida se toma **sólo si `func_6D5980()` devuelve != 0**:
+  ```
+  0x51f4d8: jal func_6D5980
+  0x51f4e0: bnez $v0 -> 0x51f4f8      ; <- gate
+  0x51f4e8: jal func_6D5C70 ; y sale (0x51f4f0 -> 0x51f568) sin subir
+  0x51f4f8: a0=*(gp-0x7E18) a1=*(gp-0x7E14) a2=0x20 a3=0x203
+  0x51f504: jal func_51EF60           ; (pinta a "pedido de bloque/asset": tamaño 0x20, flags 0x203)
+  0x51f50c: jal func_6F1F90(a0=1)
+  0x51f514: jal func_6D5500
+  0x51f520: jal func_6D5DF8(a0=$sp+0x20, a1=$v0)
+  0x51f534: *(0xA42514) = $v0
+  0x51f53c: jal func_6D57E8           ; <- la subida (opcode 2)
+  0x51f540: *(0xA42518) = $v0 (delay slot)
+  0x51f544: bnez $v0 -> 0x51f564       ; el runner reacciona al resultado
+  ```
+- **Preguntas abiertas (decimoctava ronda)**: (a) ¿`FUN_0051f450` se entra una vez o por frame? (tracear
+  `0x51f450`); (b) ¿qué es `func_6D5980` (el gate) y por qué devuelve != 0 sólo una vez?; (c) ¿qué pide
+  `func_51EF60` con `a2=0x20/a3=0x203` y por qué no completa para las otras 10 páginas?; (d) el objeto
+  `0x00A887C8` y sus globals `gp-0x7E18`/`gp-0x7E14`/`0xA42514`/`0xA42518` son el estado del gestor ⇒
+  compararlos contra el real (`eeMemory.bin`) para ver en qué se diferencian.
 
 
 
