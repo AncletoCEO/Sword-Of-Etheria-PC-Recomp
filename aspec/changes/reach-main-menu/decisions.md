@@ -1034,7 +1034,51 @@ hueco es el **FIFO/PATH3 directo** (implementarlo); si no, el uploader del juego
 **Próximo paso (decimosexta versión)** — ir a Gemini (v69) con esto: *¿cómo sube este motor el atlas PSMT8 y su
 CLUT (qué función/recurso, p. ej. el handle `*($s0+0x1B4)` / `0x65216110`), y qué lo gatea?* En paralelo:
 loguear el `TEX0` completo (`cbp`/`cpsm`/`csa`) de esos 12 draws para saber si la *paleta está declarada* pero
-no subida (uploader roto) o si el juego directamente no la sube.
+no subida (uploader roto) o si el juego directamente no la sube. **(RESPONDIDO en la decimosexta ronda.)**
+
+**2026-10-17 (decimosexta ronda) — VERIFICADO POR BYTES: nuestro camino de subida es idéntico al real; falta el ATLAS PSMT8**
+
+Artefactos: `work/teleport/GS.bin` (volcado real del menú), `work/teleport/recomp_vram_menu.bin` (nuestro, dump
+tardío) y `work/teleport/diff_vram.py` (comparación reproducible).
+
+- **`GS.bin` NO es VRAM cruda**: son **425 bytes de header + 4 MB de VRAM + 84 de cola** (4 194 813 bytes).
+  Verificado por contenido: el patrón de la paleta de `CBP=10268` aparece en el archivo exactamente 425 bytes
+  después de su dirección VRAM. (Sin descontar eso, toda comparación muestra un corrimiento falso de 425 y
+  miles de bytes "distintos".)
+- **Con el header descontado, nuestra page `0x280000` (TBP0=10240) y su CLUT (`CBP=10268`) son
+  byte-idénticas al real**: `0 de 8192` y `0 de 1024` bytes distintos. ⇒ **el camino GS/A+D/DMA del runtime
+  es correcto** (setup `BITBLTBUF/TRXPOS/TRXREG/TRXDIR` + payload + destino + swizzle) — el hueco NO es nuestro.
+- **Lo que falta es completo y grande**: pages `0x282000`–`0x294000` (tbp 10272–10560) = **~21 KB de texeles
+  PSMT8 + CLUTs** que el real tiene y nosotros **no subimos nunca**. Los draws texturizados son **2738**
+  (`[gs:content] TOTAL kicks=20000 colored=133 textured=2738`) y su `TEX0` es `TBP0=10240 TBW=2 PSM=19 PSMT8
+  TW=64 TH=64 TCC=1 TFX=0(MODULATE) CBP=10268 CPSM=0 PSA=0` ⇒ **el color sale 100% de la textura** (con `TCC=1`
+  el `rgba=0` del vértice es irrelevante); las texturas que faltan ⇒ negro.
+- **Camino del uploader (código generado + los `pc` de los kicks)**: `FUN_006efd28` (`0x6efd28`) arma el packet
+  A+D (`func_4D0450`) y lo manda con `func_4D07E8` (**`$a1 = $s7-0x2600`, `$a2 = 0xD`** = los 13 qwords /
+  `QWC=0xd` que ya veíamos), y espera en un bucle (`func_4D1A60`, `bnez $v0`). Su caller es **`FUN_006f0a38`**
+  (`0x6f0bc4`), que **guarda los parámetros de transferencia en el nodo** (`sdr $a0,0x28($s0)`,
+  `sdl/sdr $a1,0x30/0x37($s0)`) y un global en **`gp+0x654`** ⇒ **cola de subidas + rutina de flush**, no subida
+  inmediata.
+- **`FUN_006f0a38` no tiene ningún caller directo** (`grep` en `work/generated/*.cpp`): se invoca
+  **indirectamente** por un slot de objeto/controlador (como el grafo de tareas). ⇒ para hallar el gate hay que
+  trazar la *entrada* a `0x6f0a38` (su `src`), no buscar `jal`.
+- **A/B del paso 4 de Gemini** (env-gateado `SWORD_NO_CRT1_DEFAULT=1`, en `gs_cpu_backend.cpp:1956`): funciona
+  — `[gs:present] #830 valid1=0 valid2=1 ... vramNonZero=3119` ⇒ se evita mezclar CRT1 (default `dispfb1=0x1400`,
+  page 0 vacía) sobre CRT2 y queda disponible el fallback a los frames de dibujo. Baseline: `valid1=1 valid2=1`
+  (rama de mezcla). **No** queda activo por defecto.
+- **Trampas nuevas de instrumento** (siguen las ya documentadas): (a) **`SWORD_TRACE_BRANCH` no flushea si hay
+  pocas líneas** ⇒ un rango que matchea poco deja el log **vacío aunque el evento haya ocurrido** (el trace de
+  132k líneas sí sirvió porque el buffer se vacía solo); (b) **`SWORD_DUMP_VRAM` vuelca en present
+  #300/#900/#1500** y las subidas caen entre #300 y #830 ⇒ hay que usar el dump tardío; (c)
+  **`SWORD_RDRAM_DUMP_LATE` (tick≥1200) no disparó** en los runs cortados con `timeout`.
+
+**Próximo paso (decimoséptima versión)** — encontrar el gate del *driver* de texturas del juego:
+(1) arreglar el flush del trace (`std::unitbuf`/`flush()`) y trazar la **entrada** a `0x6f0a38` y `0x6efd28`
+(capta el `src` = el `jalr` del controlador y el bucle que debería recorrer las 11 páginas); o
+(2) volcar en cada subida los campos del **nodo** (`+0x28/+0x30/+0x37`) y el global **`gp+0x654`**, y compararlos
+contra el descriptor real (`eeMemory.bin`, `*($s0+0x1B4)` → `0x00e89668`). Hipótesis a falsar:
+(a) cola de subidas paginada esperando una confirmación de DMA/VBlank que nunca llega; (b) flag "residente en
+VRAM" en el nodo que saltea las 10 páginas restantes.
 
 
 
