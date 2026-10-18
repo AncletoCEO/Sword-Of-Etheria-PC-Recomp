@@ -968,10 +968,29 @@ avanza en nuestro run.
 - Referencia visual del objetivo: **`work/teleport/state_menu.png`** = el menú real ("Select video format…
   NTSC(60Hz) / PAL(50Hz)").
 
-**Próximo paso (decimotercera versión)** — atacar el **color de lo dibujado**: loguear el payload de los
-prims del *menú* (los `prim=6` = `GS_SPRITE` y los `tme=1` = texturizados) con el probe `[gs:gif] … regs=`
-ya existente, para separar "el color que manda el juego es 0" de "la textura/`tmem` está vacía" de "el blend
-lo apaga". Si hace falta, comparar el `tmem`/`TEX0` de esos draws contra el savestate.
+**2026-10-17 (decimotercera ronda) — sin subida de texturas al GS: todo se dibuja negro con alpha**
+
+- **El probe `[gs:prim]` (64 prims) lo dice directo**: los prims del juego son **`type=6` = `GS_SPRITE`** con
+  **`tme=0`** y **`rgba=(0,0,0,0)`**, dibujados en **`fbp=128`, `fbw=8`** (`alpha=0x44`), y sólo 12 con
+  `tme=1` (texturizados). ⇒ los sprites del *menú* van **texturizados** pero **el color del vértice es 0**: el
+  color tendría que venir de la **textura**.
+- **Y no hay texturas**: en el log, **todos** los paquetes GIF son **`flg=0` (PACKED) y ninguno `flg=2`
+  (IMAGE)** (48/48 en los dos runs medidos) ⇒ **nunca se sube una textura a `tmem`** ⇒ los sprites con
+  `tme=1` se rasterizan con textura vacía = **negro + el alpha de la textura** ⇒ **explica el síntoma exacto**
+  del frame presentado: pantalla completa con `aNZ=286720 (640×448)` y `rgbNZ=0`.
+  - Coincide con la nota del **2026-10-10** que quedó abierta: *"no llega ninguna subida de textura al GS;
+    todos los `[gs:gif]` son `flg=0` (PACKED), cero paquetes IMAGE (`flg=2`)"*.
+- **Contexto que sostiene esto**: el juego ya está lógicamente en el menú (Task#4 == real), el pipeline 2D
+  corre (dispatch → traversal → encolado, `FUN_006e58b8` ×394), el VU1/GS está vivo, el fade terminó
+  (`*(engine+8)` → 1.2) y la presentación lee la página que le dicen los registros (DISPFB1 = el default del
+  runtime, `fbp=0`; el real tiene `DISPFB1 = 0x00080080` ⇒ FBP=128, la misma página en la que el probe ve
+  dibujar los prims). El único eslabón faltante es **la textura**.
+
+**Próximo paso (decimocuarta versión)** — atacar el **camino de subida de texturas** (GIF IMAGE / PATH3):
+instrumentar en `ps2_memory.cpp` el handler de cadenas del canal GIF (`tryProcessNativeGifImageUploadChain` /
+`tryProcessNativeGifPackedChain`, que son **heurísticas de forma de cadena**) para ver **qué cadenas manda el
+juego** y por qué no se consumen como IMAGE; y ver si `sceGsExecLoadImage`/el uploader del juego es
+recompilado o HLE. Verificación del hito: aparece `flg=2` en los logs y `[gs:diag] crt1 rgbNZ > 0`.
 
 
 **Próximo paso (cuarta versión — SUPERSEDED por la quinta de arriba)** — el camino al menú pasa por la fase, no por el render:
