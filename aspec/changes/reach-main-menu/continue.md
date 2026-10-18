@@ -1,9 +1,12 @@
 # Continuar — reach-main-menu
 
-> **Punto de entrada vigente: `HANDOFF.md`** (estado definitivo, herramientas, descartado y próximo paso).
+> **Prompt de arranque vigente: `CONTINUE_PROMPT.md`** (en esta misma carpeta; idéntico a
+> `work/START_NEXT_SESSION.md`, que está fuera de git). Pegarlo al inicio de la sesión nueva y arrancar con
+> **`/cleto-apply reach-main-menu`**. Incluye el estado verificado al 2026-10-17 (noche), las tareas
+> pendientes de `tasks.md` y el **protocolo para pedir consultas a Gemini**.
 >
-> Este archivo antes acumulaba el log de sesiones. Se consolidó el 2026-10-09 para evitar ruido: el detalle
-> por sesión quedó en git, el resumen en `HANDOFF.md` y el detalle por evidencia en `decisions.md`.
+> Punto de entrada histórico: `HANDOFF.md` (2026-10-16) y `decisions.md` (evidencia cruda por ronda:
+> **rondas 16-20 del 2026-10-17 son las vigentes**).
 
 ## En 3 líneas
 

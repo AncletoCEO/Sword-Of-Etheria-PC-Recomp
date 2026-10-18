@@ -135,6 +135,31 @@
 
 ---
 
+## Sesión 2026-10-17 (noche) — TEXTURAS: el eslabón es el gestor de UI, no el GS
+
+> Mediciones vigentes en `decisions.md` §rondas 16-20. **No re-descubrir**: el camino GS/A+D/DMA del
+> runtime está **probado byte a byte** contra el real y es correcto; el estado del gestor de texturas
+> (`0xA887B8`) es byte-idéntico al real salvo 3 palabras; lo que falta es la **lista de 6 objetos de UI**
+> cuyo centinela vive en `0xA887B8+0xBC` (`0xA88874`), que en nuestro run está vacía y **nunca se escribe**.
+
+- [ ] **Trazar la entrada de las funciones del cluster de la clase** (`0x6d6290`, `0x6d6310`, `0x6d6390`,
+      `0x6d6410`, `0x6d6490`, `0x6d6510`, `0x6d67a8`, `0x6d68a0`, `0x6d6a80`, `0x6db0d0`) y ver cuál **no** se
+      ejecuta en nuestro run. Método que ya funcionó: `SWORD_TRACE_BRANCH=<entrada>-<entrada+1>` y leer
+      `src=` (el caller) en `/tmp/sword_branch.log`.
+- [ ] **Identificar la función que *enlaza* la lista** (la que escribe `next`/`prev` del centinela).
+      Pista: el centinela real tiene la vtable de la clase en `+8/+0xC/+0x10`
+      (`0x004c6568`/`0x004cb430`/`0x004c6c20`) ⇒ el constructor de la clase instala eso; buscarlo por los
+      inmediatos (`addiu …, 0x6568` = 25960, y pares `lui 0x4C`; ver `FUN_006d13a0`, que es *otro* instalador:
+      corre 1 vez pero no toca el centinela).
+- [ ] **Comparar por contenido** (no por dirección: el heap está corrido **+0x150**) si los 6 objetos existen
+      desenlazados en nuestro dump o no existen. Firma: floats `0x3F800000` (1.0) y `0x3F7FFFFF` en `+8`,
+      paso de **0x280** entre nodos en el real (`0xE8C058 → 0xE8C2D8 → 0xE8C558`), más `0xE81F18`,
+      `0xCB6028`, `0xCB5818`.
+- [ ] **Si el bloqueo es de datos del motor y no se resuelve leyendo**: pedir consulta a Gemini con el
+      protocolo de `work/START_NEXT_SESSION.md` §Protocolo Gemini (contexto de trabajo en el primer mensaje;
+      el usuario hace de proxy). Candidata: `work/gemini/msg_gemini_v70.md`.
+- [ ] **Verificar el hito**: `[gs:diag] crt1 … rgbNZ > 0` (y, cuando ocurra, subir `main` del repo del juego).
+
 ## Plan de producto (definido 2026-10-15 — NO implementar aún)
 
 > Estos items quedan planificados; se ejecutan al cerrar el hito del menú. Ver `proposal.md`
