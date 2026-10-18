@@ -927,9 +927,27 @@ falta identificar **quién** debe hacer el `SignalSema`/`WakeupThread` y **qué*
   se vacía al GS**. Es un problema de **flush/emisión** (o de que el flush corre en una fase/thread que no
   se ejecuta en nuestro scheduler).
 
-**Próximo paso (undécima versión)** — instrumentar la **etapa 3**: quién debería llamar a `FUN_00754398` /
-`FUN_0070b868` / `FUN_0075ccc8` (¿el final del frame, un VSync, el `0x6e4cc0`/flip?), y si el flush ve la cola
-con ítems. Comparar con el real (`eeMemory.bin`: la cola `0xA887B8`/`0xA370D0` tiene ítems ✓).
+**2026-10-17 (undécima ronda) — el menú se dibuja y lo tapa el fade (el frame está cubierto por un quad negro con alpha)**
+
+- **La cadena de dibujo corre completa hasta el GS**: `vu1:mscal` ×60, `gs:kick`/`gs:gif` ×96, `XGKICK` ×40,
+  `vif1-chain` ×60 ⇒ VU1/GS vivos; y los prims que llegan son **`prim=6` = `GS_SPRITE`** (los sprites del
+  menú, no sólo el fade) con **`tme=1` ×12** (draws **texturizados** ✓) además de los `tme=0`.
+- **El síntoma exacto**: `[gs:diag] crt1 (fbp=0) rgbNZ=0 aNZ=286720` — **286720 = 640×448 = la pantalla
+  entera** con alpha ≠ 0 y **RGB = 0** ⇒ lo último que se pintó es **un quad negro que cubre todo**: el
+  **fade**. Es decir: el menú está dibujado (o se dibuja) pero **el fade lo tapa**, y su alpha no está
+  llegando a 0.
+  - VRAM: `vramNonZero=478575` con el patrón alpha-only en los primeros 2 MB + `per256K=[10]=3119`
+    (la página del *draw*, 80) ⇒ hay contenido, pero lo del frame es alpha sin color.
+- **Corrección a la etapa 3 del v68**: `FUN_00754398`, `FUN_0070b868` y `FUN_0075ccc8` **no están
+  referenciadas en ningún lado** (ni `jal` en el generado ni puntero en los 32 MB de RAM del savestate) ⇒
+  no son el flush real. (Como referencia: `FUN_00743268` —el emit por hijo— **sí** aparece como puntero en
+  el heap (9+ nodos en `0xC7xxxx`) y `FUN_00743568` se llama por `jal` desde `FUN_00506af0`.)
+
+**Próximo paso (duodécima versión)** — atacar el **fade**: loguear su valor/estado por tick (el argumento del
+setter `*(gp-0x33C)` vtable `+0x5C`, o el alpha del quad del fade en los `[gs:gif]`), y comparar con el real
+(en `eeMemory.bin` el estado de menú ya tiene el fade terminado: su framebuffer tiene contenido **con color**).
+Si el fade no baja a 0, hay que ver **quién debería bajarlo** (un contador por frame / un VBlank) y por qué no
+avanza en nuestro run.
 
 
 **Próximo paso (cuarta versión — SUPERSEDED por la quinta de arriba)** — el camino al menú pasa por la fase, no por el render:
