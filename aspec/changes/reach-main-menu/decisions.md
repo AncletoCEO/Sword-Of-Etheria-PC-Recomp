@@ -1222,3 +1222,601 @@ VRAM" en el nodo que saltea las 10 páginas restantes.
 3. Comparar el **estado de fase** recomp vs savestate de la misma fase (`work/teleport/eeMemory.bin`) antes
    de encadenar más deducciones: el `0xA93728` del recomp no tiene por qué caer en la misma dirección en
    consola (el heap difiere ~`0x150`), así que comparar por **contenido/estructura**, no por dirección.
+
+## 2026-10-18 — verificación de la respuesta v70 de Gemini + A/B que REFUTA "falta el atlas"
+
+> Todas las mediciones de esta sección son propias (artefactos en `/tmp`), no deducciones.
+
+### (1) Corrección de marco: `FUN_0051f450` NO es un bucle; el bucle de frame es `FUN_00512630`
+
+- **`FUN_0051f450` (`0x51f450-0x51f578`) es estrictamente lineal** (leído el generado completo): `func_6E6D00`
+  → setup `0xA42530` → `func_6D5AD0` (ctor del gestor) → `func_51F580` → **`func_6D5980` (gate)** → si hay
+  trabajo: `func_51EF60`/`func_6F1F90`/`func_6D5500`/`func_6D5DF8` → **`func_6D57E8` (opcode 2 = UNA subida)**
+  → `0x51f544: bnez $v0, 0x51f564` (**salto hacia adelante**, devolver 1) → `ret`. **No hay lazo.**
+  ⇒ La frase de la ronda 19 ("el bloque del runner es un bucle sobre el gestor") es un **error de lectura**.
+- **`SWORD_TRACE_BRANCH=51f450-51f579`** (150 s): `FUN_0051f450` entra **1 vez** (de `src=0x512ac8`) y recorre
+  el camino de subida 1 vez. ⇒ **toda la corrida sube UNA textura** (las 5 sub-rect TRXDIR a `dbp=10240`).
+- **`SWORD_TRACE_BRANCH=51fe00-51ff40`** (140 s): el bucle `FUN_0051fea0` llama `FUN_00512ab0` (`0x51fee8`)
+  **1 vez** y `FUN_00512630` (`0x51fef0`) **1 vez**. **Y eso es CORRECTO**: `FUN_00512630` **es** el bucle de
+  60 fps de la fase (verificado: contiene `jal func_51FCF0` (vsync), `func_511F60` (pad), `func_5FBB90`
+  (audio), `func_51AA80` (árbol de tareas), `func_510A10` (kick GS), `func_6291A0`, `func_62B250` (flip),
+  `func_51A100`). `FUN_0051fea0` es el bucle de **cambio de fase**, no el de frame.
+- **Confirmado contra el savestate**: el objeto de fase `*(gp-0x358)` (real `0xA93870` / nuestro `0xA93720`,
+  offset heap `0x150`) tiene **contenido idéntico**: `+0 = 0`, `+4 = 3f800000`, **`+8 = 0`**, `+0xC = 0x009f3028`.
+  Y `*(gp-0x324)` = `0xC61890`/`0xC619E0` → `+0 = 4`, `+0xC = 0`. ⇒ **que `FUN_00512630` no salga es normal**
+  (el menú es la 4ª tarea); NO es nuestro bug. (Cierra el "próximo paso 4ª versión".)
+
+### (2) El centinela `0xA88874` es transitorio — línea DESCARTADA (coincide con Gemini)
+
+- Las funciones que insertan corren a montón (`0x6d6290`=900, `0x6d6310`=902, `0x6d6390`=899, `0x6d6a80`=8694)
+  y el "clear" `0x6db0d0` corre **3593** veces; los 6 nodos reales son **matrices de transform 4×4**.
+- Objetos del mismo tipo existen en nuestro dump (patrón matriz-identidad+`0x00020003`: **30 vs 27**).
+  ⇒ la lista se rearma/vacía por frame; la foto del `.p2s` la agarró llena y la nuestra vacía. **No explica
+  nada del menú negro.**
+
+### (3) `GS.bin` (VRAM del real en el menú): **sólo contiene el atlas**, el resto de la VRAM está en cero
+
+- Header verificado otra vez: **425 bytes** (con `hdr=425` las pages 320–330 suman 24 293 B ≠ 0, el esperado).
+- **Mapa completo**: el real tiene data **únicamente** en el bucket 10 (`0x280000–0x2C0000`): pages
+  320–330 (24 293 B). **Pages 0–299 = 0** (incluida la 128 = FBP del `DISPFB1` real). Bucket 16 = 5 bytes.
+- Nuestra VRAM (run normal): buckets 0–7 llenos (≈2 MB de clear **alpha-only**, `0x7F…`) + bucket 10 = 3119
+  (sólo page 320). Con la inyección: `vramNonZero=24293` (sólo el atlas).
+
+### (4) **A/B DECISIVO: inyectar la VRAM del real NO muestra el menú ⇒ "falta el atlas" queda REFUTADO**
+
+- Herramienta: `SWORD_LOAD_GS` lee 4 MB **desde el offset 0** ⇒ con `GS.bin` mete los 425 B de header
+  (bug). Workaround sin recompilar: `dd if=GS.bin of=/tmp/GS_vram.bin bs=1 skip=425 count=4194304`.
+  **(Corregir el offset en `triageLoadGs` es deuda pendiente.)**
+- Run `SWORD_LOAD_GS=/tmp/GS_vram.bin` (130 s, sin teleport de RDRAM): `[load-gs] VRAM 4 MB inyectada`,
+  y el frame **sigue negro**: `[gs:diag] crt1 (fbp=0): rgbNZ=0 aNZ=0 | crt2 (fbp=0): rgbNZ=0 aNZ=0`,
+  `vramNonZero=24293` (sólo el atlas inyectado, el juego no reescribió nada).
+- ⇒ **Con el atlas presente en VRAM el menú NO aparece.** El atlas **no** es la causa del frame negro.
+- **Lo que sí diverge es la PRESENTACIÓN**: nosotros presentamos **`fbp=0`** (`dispfb1=0x1400` = el *default
+  del runtime*, `ps2_memory.cpp:578`; el juego **nunca** escribe `DISPFB1`/`DISPLAY1`), y el `DISPFB1` del
+  real es `0x00080080` → **FBP=128**. El contexto de **dibujo** es `ctx=80/8/0` (el juego dibuja en la
+  page 80 = `0x280000`). Con la VRAM inyectada, la page 80 **tiene** contenido y aun así el present sigue
+  eligiendo la page 0: el fallback por contenido de `PresentFromLocalMemory` (línea ~2024) **no selecciona**
+  el candidato `ctx=80/8/0` (el `[gs:diag]` sigue diciendo `crt1 (fbp=0)`).
+- **Nuevo foco (reencuadre)**: el bloqueo vigente es **de presentación / `DISPFB`/`DISPLAY`**, no de subida
+  de texturas. Próximo paso concreto: instrumentar `copySource`/`CopyFrameToHostRgba` para ver por qué el
+  candidato `80/8/0` no gana (¿devuelve `false`? ¿`countNonBlackPixels == 0`?) y, en paralelo, por qué el
+  juego nunca escribe `DISPFB1`/`DISPLAY1` (¿los escribe por DMA en un paquete que el runtime no parsea?).
+
+### (5) Respuesta v70 de Gemini — qué quedó verificado y qué no
+
+- ✅ **Verificado**: `FUN_00512630` es el bucle de frame (sus `jal` coinciden exactamente); el flag de fase
+  `*(s1+8)=0` también en el real; el centinela es transitorio (descartar); `FUN_0051f450` es init de fase.
+- ❌ **NO verificado**: *"los datos del atlas YA están en RAM en `0x00cd0000` (real) / `0x00cd04ff` (nuestro)"*.
+  El bloque de `0x00cd067f`/`0x00cd04ff` es **una tabla que existe idéntica en AMBOS** dumps, y **el contenido
+  de la page 321 de la VRAM no aparece en la RAM** (ni exacto ni por ventanas de 16 B). ⇒ El **Paso 3 (PoC de
+  inyección desde `rdram+0xcd04ff`)** no tiene base. La inyección probada (desde `GS.bin`) **tampoco** muestra
+  el menú (ver (4)).
+
+### (6) Sondas nuevas (`[dc-probe]`, `[present-fb]`) — el "display copy" NUNCA ocurre y el dibujo cae en la page 0, que queda VACÍA
+
+Probes temporales (NO env-gated, pocas líneas): `gs_frontend.cpp::updatePreferredDisplaySourceForDraw`
+(`[dc-probe]`) y `gs_cpu_backend.cpp::PresentFromLocalMemory` (fallback: `[present-fb]`).
+
+- **`[dc-probe]`: no hay NINGÚN sprite full-screen texturizado.** La única línea es un sprite full-screen
+  **todo en cero** (`tme=0 abe=0 fst=0 ctxt=0 frame.fbp=0 tex0.tbp0=0 tw=0 th=0`). ⇒ **la heurística
+  "display copy" (blit framebuffer→página de display) nunca se dispara**; el runtime no tiene
+  `preferredSource` y depende **solo** de `DISPFB`. (`[gs:content]` sólo ve **13** prims `tme=1`, todos
+  `tex0(tbp0=10240 tbw=2 psm=19 tw=6 th=6) uv=(13312,15072) rgba=(0,0,0,0)` — **no** son de pantalla completa.)
+- **Contexto de dibujo del juego**: **cambia con el tiempo** — al principio `ctx=128/8/0`, y en la fase de
+  menú **`ctx=0/8/0 0/8/0`** (ambos = page 0). `[gs:present] #590`: `valid1=1 valid2=1 dispfb1=0x1400`
+  (default) `dispfb2=0x80000001000` (→ fbp=0) `vramNonZero=3119` `per256K=[10]=3119` (¡sólo la page 320!).
+- **PRECEDENTE CLAVE**: **la page 0 —el contexto de dibujo— está VACÍA al final**
+  (`[gs:diag] crt1 (fbp=0): rgbNZ=0 aNZ=0`) y **el resto de la VRAM también** (sólo page 320 = las 5
+  sub-rects). O sea: **el juego dibuja (13 prims texturizados) pero no deja pixel en la VRAM**. Y como
+  `DISPFB1` (default, page 0) y `DISPFB2` (page 0) apuntan a esa page vacía ⇒ negro.
+- **Coincidencia fuerte**: la VRAM **del real** (`GS.bin`) también tiene **pages 0–299 en cero**. ⇒ La
+  "página vacía" **no** es un artefacto nuestro: el real tampoco tiene framebuffer en esa zona. ⇒ El frame
+  visible del real **tiene que** venir de otra parte (¿la page 128? ¿un dump incompleto de `GS.bin`?), **o**
+  `GS.bin` se capturó en un momento sin frame válido.
+- **Siguiente paso concreto** (probes ya montados, sólo falta extenderlos): loguear en el rasterizador de
+  prims `tme=1` (a) el `fbp/fbw` de destino y (b) si el write se descarta (alpha-test/blend con
+  `rgba=(0,0,0,0)`), para responder *"¿por qué 13 prims texturizados no escriben nada en la page 0?"*.
+  Hipótesis viva: **el color/alpha del vértice llega 0 y el prim se descarta o se escribe transparente**
+  (el dato vendría del `TEXA`/`RGBAQ` que arma el juego — comparar `TEXA`/`ALPHA` con el real).
+
+### (7) CADENA COMPLETA LOCALIZADA (2026-10-18) — los sprites del menú se descartan porque su **UV es (0,0)**
+
+Probes nuevos: `[tri-probe]` (DrawTriangle texturizado), `[tex-probe]` (samplePoint), `[clut-probe]`
+(LookupCLUT). Cadena medida, en orden:
+
+1. **Los prims texturizados del menú son `TRISTRIP` (`type=4`), no sprites**, y **dibujan en la page 128**
+   (`dest fbp=128 fbw=8 psm=0`) — que **coincide con el `DISPFB1` del real (FBP=128)**. Nuestro `DISPFB1`
+   es el default del runtime (page 0) ⇒ aun arreglando el color habría que presentar la page 128 (o el
+   fallback por contenido debe elegirla).
+2. **TODOS los píxeles se DESCARTAN** (`[raster-probe] DISCARD tme=1 dest fbp=128 … rgba=(0,0,0,0)
+   test=0x5002b alpha=0x44`). `TEST=0x5002b` → `AXT=1`, **`ATST=5` = `alpha >= AREF`** con **`AREF=2`**,
+   **`AFAIL=0` = KEEP** ⇒ con alpha 0 **se descarta cada píxel** (nada se escribe ⇒ VRAM vacía ⇒ negro).
+3. **El alpha compuesto es 0 porque el TEXEL es (0,0,0,0)**, no por el vértice: `[tri-probe]`
+   `v0=(0,0,0,0) shade=(0,0,0,249) texel=(0,0,0,0) out=(0,0,0,0)`. **El alpha interpolado del vértice es
+   ~249** (válido). Con `TCC=1`/`TFX=0` (MODULATE) el color/alpha sale de la textura.
+4. **El texel es 0 porque la COORDENADA DE MUESTREO es (0,0) en todos los píxeles**: `[tex-probe] raw=0x0
+   su=0 sv=0 psm=19 tbp0=10240 tbw=2 texW=64 texH=64 cbp=10268 cpsm=0` (8/8 idénticas).
+   ⇒ **la `UV`/`ST` de los vértices llega en 0** (la textura en sí no importa: siempre muestrea (0,0)).
+5. **`CLUT[0]` es transparente aun en el real**: `[clut-probe] idx=0 clutIndex=0 c0=0 c256=0 csm=0 csa=0`
+   y en `GS.bin` el byte 0 de `0x281C00` es `00 00 00 00`. ⇒ aun con la CLUT bien cargada, el índice 0 da
+   alpha 0. **No es la CLUT.** (Se probó una hipótesis de CLD=0 y se refutó: el juego usa **`CLD=1`**,
+   que sí carga el cache; el cambio se revirtió.)
+6. La textura (page 320 = `0x280000`) **está presente e idéntica al real**, y el atlas (pages 321–330)
+   **no cambia el resultado** (ver (4) y (6)) ⇒ **"falta el atlas" no es la causa**.
+
+**CONCLUSIÓN**: el eslabón es el **decode de las coordenadas de textura del vértice** (UV/ST en `0`). Es un
+**bug de fidelidad del runtime**, no un dato faltante ni un parche por dirección.
+
+**Próximo paso** (una sonda más + rebuild): en el prim `tme=1` loguear `v0.u/v0.v/v0.s/v0.t/v0.q` (y `fst`)
+al entrar al batch, para ver si llegan 0 desde el **decode de vértices empaquetados** (GIF `REGS`/`PACKED`)
+o si el `ST`/`UV` del registro no se propaga a la cola de vértices. Comparar con PCSX2 (`tools/ps2emu/pcsx2`,
+solo referencia). Nota: la sonda `[gs:prim]` sólo cubre los primeros 64 prims (todos `tme=0`, el fade/clear),
+por eso no se ven ahí.
+
+> **Probes temporales dejados puestos** (no env-gated, ~decenas de líneas): `[raster-probe]`, `[tri-probe]`,
+> `[tex-probe]`, `[clut-probe]`, `[dc-probe]`, `[present-fb]`. Revertir/limpiar al cerrar el diagnóstico.
+
+### (8) Sonda de UV/ST — el prim texturizado llega **DEGENERADO** (3 vértices idénticos) y con `ST ≈ 0`
+
+`[uv-probe]` (en `DrawTriangle`, primeros 6 prims `tme=1`): las 6 líneas son idénticas:
+```
+[uv-probe] tme=1 fst=0 type=4 v0(u=0x3400 v=0x3ae0) v1(u=0x3400 v=0x3ae0) v2(u=0x3400 v=0x3ae0)
+           s0=0 t0=0 q0=1 s1=0 t1=0 q1=1 s2=0 t2=0 q2=1
+           xyz0=(2048,2048) xyz1=(2048,2048) xyz2=(2048,2048) texW=64 texH=64 tbp0=10240
+```
+Lectura:
+- **`fst=0`** (modo ST) y **`s=t=0, q=1`** ⇒ `texUf = s/q*texW = 0` ⇒ `su=0 sv=0` (consistente con (7)).
+- El **mismo qword** que da `u=0x3400 (13312)`/`v=0x3ae0 (15072)` da `s=0x00003400`/`t=0x00003ae0` como
+  **float32** ⇒ ~1.9e-41 ≈ 0. **Ojo**: PCSX2 también guarda `ST.S/ST.T` como float (`GSState.cpp:2619`
+  `v->ST.S = std::bit_cast<float>(S)`), o sea **nuestro decode de ST NO está mal**; con `FST=0` el juego
+  estaría mandando ST ≈ 0. (La otra lectura, UV con `FST=1`, daría `su=0 sv=46` por wrap, no lo medido.)
+- **NUEVO E INDEPENDIENTE DEL FST: el prim llega DEGENERADO** — `v0 == v1 == v2` (misma `xyz`, misma UV).
+  La sonda `[gs:prim]` de los primeros 64 prims (`tme=0`) muestra lo mismo (`v2 == v0`).
+  ⇒ **el armado del batch/cola de vértices está produciendo primitivas colapsadas**; un triángulo
+  degenerado no cubre píxeles ⇒ no escribe nada ⇒ negro (además del descarte por alpha=0).
+- `xyz=(2048,2048)` para los 3 vértices huele a **vértice no inicializado / cola mal alineada**.
+
+**Conclusión de la sesión**: el bloqueo NO es el atlas, ni la CLUT, ni el present: es **el armado de
+vértices** (prims degeneradas + ST≈0 ⇒ se muestrea siempre (0,0) ⇒ texel transparente ⇒ alpha test
+descarta ⇒ VRAM vacía). Siguiente paso: bisectar el armado de la cola de vértices (`vertexKick` /
+`readVertexStream` / el pasaje VU1→GIF) contra PCSX2.
+
+> **Caveat importante de esta sonda**: los 6 prims que loguea `[uv-probe]` son **los primeros** `tme=1`
+> y están **fuera de pantalla** (`xyz=(2048,2048)` con `ofx/ofy` chico ⇒ x=2048 px > 640) y degenerados.
+> Los prims que **sí rasterizan** son los del `[tri-probe]` (que sí imprimió píxeles `(0,0)…(7,7)` con
+> `su=sv=0`). ⇒ Falta una sonda que loguee la **UV/ST del prim que rasteriza** (dentro del lazo de
+> píxeles, 1 vez por prim), no de los 6 primeros. No dar por cerrado el "ST≈0" hasta medirlo en el prim
+> que dibuja.
+
+### (9) Respuesta v71 verificada + sonda del prim real: **el alpha test es SÍNTOMA, no causa**
+
+- ✅ **Verificado de Gemini v71**: (a) el `uv=(13312,15072)` era **artefacto del log** — `[gs:content]`
+  imprime `v.u, v.v` (`gs_frontend.cpp:1661`), no `v.s, v.t`; (b) los paquetes **sí** traen ST válido:
+  `[XGKICK-fin] raw=…:3f800000 | 3eae00003e000000:3f800000 | …` ⇒ **S=0x3e000000=0.125, T=0x3eae0000=0.340,
+  Q=1.0**; (c) las prims degeneradas de los primeros kicks son **padding/strip-restart normales** (y la
+  sonda previa sólo capturaba esas); (d) la semántica de `TEST=0x5002b` (ATST=5 GEQUAL, AREF=2, AFAIL=KEEP)
+  y `A_out = A_shade*A_tex/128` es correcta.
+- **Sonda `[real-tri-probe]`** (1 vez por prim que **rasteriza**, dentro del lazo de píxeles; agregada en
+  `DrawTriangle`): los prims reales del menú traen
+  `fst=0 type=4 fbp=128 fbw=8 tbp0=10240 texW=texH=64`,
+  `v0 xyz=(2308.87,2309) st=(0.48633,0.0117187) q=1 uv=(0,0) rgba=(128,0,128,255)`,
+  y el primer píxel da `px=(256,256) is=0.486327 it=0.0117187 iq=0.999999 iu=iv=0
+  texUf=31.1249 texVf=0.749999`. ⇒ **ST válido y coordenada de muestreo ~(31,0)**, NO (0,0).
+  (Los prims #1/#2 sí tenían `st=(0,0)` — eran el padding.)
+- **PRUEBA DE FUEGO (Gemini v71 paso 2, `SWORD_NO_ALPHA_TEST=1`, env-gated): con el alpha test
+  BYPASSEADO la VRAM SIGUE SIN CONTENIDO** — `[gs:present] #600 vramNonZero=3119`, `per256K=[10]=3119`
+  (sólo la page 320). ⇒ **el descarte por alpha no es la causa raíz**: aunque se escriba, el color
+  resultante es 0 (el texel/CLUT resuelve a 0 en la coordenada real). El alpha test es **síntoma**.
+- **Paso 3 implementado (env-gated, default OFF)**: `SWORD_PRESENT_CTX=1` ⇒ si `dispfb1 == 0x1400`
+  (default del runtime) presenta `contextFrames[0]` (page 128, el `DISPFB1` del real).
+- **Falta cerrar**: loguear el **texel** muestreado en el prim real (la sonda actual loguea `is/it/iq`
+  antes de `SampleTexture`) y compararlo con la VRAM real offline (page 320 = `GS_vram.bin[0x280000]`,
+  que es **byte-idéntica** al real), para decidir si `(31,0)` da índice 0 / CLUT 0 de verdad o si el
+  lookup (PSMT8/CLUT) está mal.
+
+### (10) El lookup PSMT8 es CORRECTO: `(31,0)` → VRAM `0x280136` = `0x00` **también en el real**
+
+- Sonda extendida (`[real-tri-probe]` ahora loguea también el **texel**). Prims reales del menú:
+  `px=(256,256) is=0.486327 it=0.0117187 iq=0.999999 texUf=31.1249 texVf=0.749999 texel=0x0
+  texrgba=(0,0,0,0)`, con `v0 st=(0.48633,0.0117187) rgba=(128,0,128,255) cbp=10268 cpsm=0 cld=1 csm=0
+  csa=0` y `fbp=128`.
+- **Verificación offline con el swizzle real del runtime** (`ps2_gs_memory.h`: `P8 PageExtent{128,64}`,
+  `BlockExtent{8,4}`, `BlockTableP8`, `ColumnTable8`; `address = page*8192 + (block+bid)*256 + col`):
+  - `(0,0)`  → `0x280000` → byte **0x00** (coincide con la medición),
+  - **`(31,0)` → `0x280136` → byte `0x00` en `GS_vram.bin` (el REAL)** ⇒ **el índice es 0 también en
+    consola** ⇒ `CLUT[0]` (que en el real es `00 00 00 00`) ⇒ texel `(0,0,0,0)`.
+  ⇒ **El camino de muestreo PSMT8/CLUT del runtime es correcto.** Estos prims magenta
+  (`rgba=(128,0,128,255)`) están muestreando **fondo transparente**: no dibujan nada ni en el real.
+  ⇒ **Estos prims NO son el contenido del menú.**
+- **Consecuencia / siguiente foco**: hay que localizar los prims que **sí** dibujan el menú (los que
+  muestrean texeles con índice ≠ 0, o que no son `tme`), y ver si llegan a ejecutarse. Sonda propuesta:
+  loguear (a) el **histograma de texeles** muestreados por prim (cuántos ≠ 0) y (b) cualquier prim con
+  `rgba` ≠ 0 y su `tbp0`, en toda la corrida — no sólo los primeros 12.
+
+### (11) Histograma de texeles: **0 de 600 prims texturizados muestrean un texel ≠ 0**
+
+`[tex-hist]` (por prim, `DrawTriangle`; run 130 s, juego en el menú: `root h20=0x500490`, `count=4`):
+
+```
+[tex-hist] #1  fbp=128 tbp0=10240 psm=19 rgba0=(0,0,0,0)       px=256 texelNZ=0
+[tex-hist] #5  fbp=128 tbp0=10240 psm=19 rgba0=(128,0,128,255) px=256 texelNZ=0
+[tex-hist] #12 fbp=0   tbp0=10240 psm=19 rgba0=(128,0,128,255) px=256 texelNZ=0
+[tex-hist] TOTAL texturedPrims=200 withNonZeroTexel=0
+[tex-hist] TOTAL texturedPrims=400 withNonZeroTexel=0
+[tex-hist] TOTAL texturedPrims=600 withNonZeroTexel=0
+```
+
+- **TODOS** los prims texturizados usan `tbp0=10240` (page 320) y **ninguno** muestrea un índice ≠ 0.
+- **La mitad rasteriza `px=0`** (degenerados/fuera de pantalla): `#2, #4, #7, #8, #13, #14, #19, #20…`.
+- `vramNonZero=3119` (sólo page 320) al final, con el juego en el menú.
+
+⇒ **El contenido del menú no está siendo dibujado por estos prims.** O bien (a) el juego dibuja el menú con
+**otro `TBP0`** (el atlas de pages 321–330 que no se sube) y esas draws no ocurren / las decodificamos mal,
+o (b) el armado de `TRISTRIP`/vertex-queue está mal (mitad degenerados), o (c) el dibujo del menú va por un
+camino que no es `DrawTriangle` (p. ej. `DrawSprite`), que **no** tiene histograma.
+
+> **Nota de método**: NO se puede concluir "el runtime dibuja mal" — el lookup PSMT8/CLUT y las
+> coordenadas ST están verificados. Lo que no está es el **contenido**: ninguna muestra cae en un texel
+> real de glifo. Pregunta a Gemini v72.
+
+### (12) Telemetría GLOBAL de draws (`[gs:prims]`): **el juego NUNCA emite las draws del contenido**
+
+Sonda global en `gs_frontend.cpp` (antes de `m_backend->Submit(batch)`), independiente del tipo de prim:
+cuenta prims por tipo y draws texturizados por `TBP0`. Run 130 s (juego en el menú, `f=1630`):
+
+```
+[gs:prims] draws=21360 POINT=1 LINE=0 TRI=0 TRISTRIP=2294 TRIFAN=8256 SPRITE=10809
+[gs:prims]   tbp0=10240 (page 320) texturedDraws=2294
+```
+
+- **El ÚNICO `tbp0` de draws texturizados es 10240 (page 320)**; nunca `10272..10560` (el atlas).
+- **`texturedDraws == TRISTRIP` (2294)**: los **8256 TRIFAN y 10809 SPRITE son `tme=0`** (sin textura).
+- **A/B con el atlas inyectado** (`SWORD_LOAD_GS=/tmp/GS_vram.bin`): **idéntico** — sigue habiendo sólo
+  `tbp0=10240` ⇒ **el gate NO es la VRAM** (inyectar el atlas no hace que el juego emita esas draws).
+- ⇒ Confirmado de Gemini v72: page 320 = chrome/íconos; el atlas de glifos (pages 321–330, `tbp0`
+  10272–10560) **nunca se usa para dibujar**. **El juego nunca emite las draws del contenido del menú**
+  (texto/glifos). El bloqueo está **aguas arriba del GS**, en la emisión 2D del juego — no en el runtime
+  de render.
+- **Próximo foco**: por qué el emisor 2D (p. ej. `FUN_006e58b8` / el componente de texto de la Task#4)
+  no produce esas draws. Consulta: `work/gemini/msg_gemini_v73.md`.
+
+### (13) Respuesta v73 VERIFICADA BYTE A BYTE: el nodo de texto nunca recibe el bind de fuente
+
+Comparación en los dos dumps (real `eeMemory.bin` vs nuestro `/tmp/rdram_late1.bin`), nodo de string
+`String 0x130` (**real `0xE83170` / nuestro `0xE82F70`**):
+
+| Campo | Real | Nuestro | Significado |
+|---|---|---|---|
+| `+0x00` | **`0x08000000`** | `0x00000000` | falta el bit 27 ("bound") |
+| `+0x2C` | `0` | `0x30` | offset crudo de archivo sin resolver |
+| `+0x3C` | **`0x0095F410`** | **`0x3B`** | **falta el puntero al contexto de glifos** |
+| `+0x4C` | `0` | `0x2C` | offset crudo de archivo sin resolver |
+
+Contexto estático del generador de glifos **`0x0095F410`**:
+- real: `00000101 00000001 00000004 00000000 | 00000000 00000004 0095F430` (**inicializado**),
+- nuestro: **todo cero** (los bytes vírgenes del ELF).
+
+Timers del **Task#4** (real `0xE21790` / nuestro `0xE21590`): `+0x2C/+0x30/+0x34` =
+real **`3/3/4`**, nuestro **`2/2/2`** (⇒ `elapsed = +0x34 − +0x2C` = 1 vs 0). `+0x38 = 0xA` y
+`+0xA4 = 2` **coinciden** en ambos.
+
+⇒ **Causa raíz localizada (medida)**: el nodo de texto se encola y `FUN_006daef0` lo recorre, pero **el
+generador de glifos aborta** porque `*(node+0x3C)` no es `0x0095F410` (contiene el offset crudo `0x3B`) y el
+contexto `0x0095F410` está sin inicializar. Es el flag que impide emitir los quads de texto ⇒ **no hay
+draws con `tbp0 ≥ 10272`** ⇒ el menú queda sin texto (y la VRAM sin el atlas).
+
+**PoC montada (env-gated, `SWORD_FORCE_FONT_BIND=1`)**: en `work/generated/FUN_0083e2e0_0x83e2e0.cpp`, en
+`label_83e540` (donde `$v0` = el nodo de string), se loguea `[font-bind] node/+00/+2C/+3C/ctx` y —sólo con
+la env— se inicializa `0x0095F410` con los bytes del real y se patchea `node+0x3C = 0x0095F410` y
+`node+0x00 |= 0x08000000`. **Probe temporal en un archivo generado: se pierde al regenerar el CSV.**
+
+**A/B pendiente**: correr con y sin `SWORD_FORCE_FONT_BIND=1` y mirar `[gs:prims]` (¿aparecen
+`tbp0=10272..10560`?) y `[gs:diag] rgbNZ`.
+
+**A/B HECHO (2026-10-18)**:
+- **Baseline**: `[font-bind] node=0xe82f70 +00=0x0 +2C=0x44 +3C=0x3b ctx0=0x0` ×6 (3 nodos:
+  `0xe82f70`, `0xe82db0`, `0xe82e90`) y `[gs:prims]` sólo `tbp0=10240`.
+- **Con `SWORD_FORCE_FONT_BIND=1`**: **NO cambia nada** — `[gs:prims]` sigue con **sólo `tbp0=10240`**
+  (2340 textured draws), `[tex-hist] withNonZeroTexel=0`, `vramNonZero=3119`. ⇒ **el bind de fuente + la
+  init de `0x0095F410` NO alcanzan**: es el caso **B** que Gemini anticipó ("el corte está en una función
+  hija de `FUN_006daef0`, p. ej. `FUN_00710580`").
+- **Ojo**: en vivo los nodos tienen **`+0x2C = 0x44` y `+0x4C = 0x44`** (offsets crudos sin resolver),
+  mientras el real los tiene en **0**. Puede faltar normalizar esos campos (además de `+0x3C`/`+0x00`).
+  Ver `work/gemini/msg_gemini_v74.md`.
+
+### (14) PoC EXTENDIDO (v74) — tampoco destraba; y la explicación del "gate +0x2C" no cierra
+
+- **Verificado**: el contexto de material real `0x0095F430..0x0095F468` coincide **exacto** con lo que dijo
+  Gemini, incluida la cadena `"PS2AllMats.cl"` (`0x41325350 0x614D6C6C 0x73632E74 0x0000006C`) y la vtable
+  `0x0075FB68` en `+0x54`.
+- **PERO la explicación del "gate letal de `+0x2C`" es autocontradictoria**: `0x7105c4: lw $v0, 0x2C($s3)`
+  y `0x7105d0: lw $v1, 0x8($v0)`. En el **real** `node+0x2C = 0` ⇒ leería `*(0x8)`; y en la RAM real
+  **la dirección `0x8` contiene `0x40196800` (código)**, no 0. O sea, poner `+0x2C = 0` **no** produce el
+  "`$s0 = 0` ⇒ skip" que Gemini describe (lo produce `+0x2C = 0x44` ⇒ `0x4C`, que sí es 0). Probablemente
+  el `$s3` de `FUN_00710580` es el **widget/elemento a renderizar**, no el nodo de string.
+- **PoC extendido ejecutado** (`SWORD_FORCE_FONT_BIND=1`: init completa del contexto+material, y
+  `node+0x00/0x2C/0x3C/0x4C` normalizados). El parche **sí se aplicó** (el log muestra `ctx0=0x101` en los
+  nodos siguientes) y el juego **llegó al menú** (`f=1570`, `t3sub=10`). Resultado: **NO aparecen
+  `tbp0 ≥ 10272`** — sigue sólo `tbp0=10240` (`texturedDraws=2158`), `vramNonZero=3119`, `rgbNZ=0`.
+  ⇒ **Caso B confirmado también con el PoC completo.**
+- **Nota de determinismo**: un run con la misma env **divergió** y se quedó en `f=180` (`t3sub=1`) sin
+  llegar al menú; el re-run anduvo. ⇒ hay **no-determinismo** ocasional; un resultado negativo aislado
+  debe repetirse.
+- **Siguiente foco** (sugerido por Gemini): visibilidad del widget (`FUN_00805340`, bit `+0x02 |= 0x04`)
+  y/o el camino de `FUN_006daef0`→`FUN_00710580`. Consulta: `work/gemini/msg_gemini_v75.md`.
+
+### (15) ¡BREAKTHROUGH! El selector PAL/NTSC esperaba **Cross**; al confirmarlo se destraba la emisión y **se sube el atlas**
+
+- ✅ **Verificado de v75** (`FUN_0083d990`, bloque `sub==10`): `0x83da58 jal func_51C7C0` (lectura de pad)
+  → `0x83da60 andi $v0,$v0,0x40` (Cross) → `0x83da64 beqz $v0 → 0x83DC24` (si no, no hace nada).
+  Si `0x40`: `*(task+0xA4)=3`, `func_510600(task,1)` (transición de salida), `func_62DD60(0x42007E)`
+  (sonido de confirmación) → sale del selector. **El juego estaba esperando input, no colgado.**
+- **PoC `SWORD_CONFIRM_MENU=1`** (en `work/generated/FUN_0083d990_0x83d990.cpp`, en `label_83da60`:
+  `$v0 |= 0x40`): el log `[confirm-menu] forzando Cross en sub=10 (v0=0x0)` dispara **una vez** y
+  **`t3sub` pasa de `10` a `0`** (f≈370) ⇒ **Task#4 sale del selector**. El juego sigue vivo (`f=1720`).
+- **EFECTO MEDIDO (lo importante)**:
+  - **El atlas ahora SÍ se sube**: `[gs-upload] n=6..10 dir=0 … dbp=10272` (page 321), que **nunca**
+    ocurría antes.
+  - **Aparecen draws con el atlas**: `[gs:prims] tbp0=10272 (page 321) texturedDraws=2647`
+    (`TRISTRIP` total 4101, antes ~2300 y **0** con tbp0=10272).
+  - `vramNonZero` 3119 → **6238** (page 320 + 321).
+  - Con `SWORD_PRESENT_CTX=1`: `fbpDisp1=128` y `[gs:diag] crt1 (fbp=128): rgbNZ=0 aNZ=151713`.
+- **Lo que sigue faltando**: `rgbNZ=0` y `[tex-hist] withNonZeroTexel=0` incluso para los prims con
+  `tbp0=10272` ⇒ los texeles del atlas siguen muestreando 0 (¿la CLUT del atlas — `cbp` de esos draws —
+  no se carga? ¿se muestrea una zona vacía?). **Pero el bloqueo de "no se emite el contenido" está
+  resuelto**: el juego emite texto/atlas en cuanto se confirma el selector.
+- **Consecuencia de producto**: el input (Cross) es **parte del flujo normal**; para el hito hace falta
+  (a) que el runtime entregue el pad (ya funciona la FSM) o simular la confirmación, y (b) que los texeles
+  del atlas resuelvan color. Consulta: `work/gemini/msg_gemini_v76.md`.
+
+### (16) v76: el "bug de cache de CLUT" queda REFUTADO por medición (y el `cbp` del atlas es 10300)
+
+- ✅ Confirmado de v76: tras forzar Cross el flujo sigue (Task#4 `sub 10 → 0`), **se sube el atlas**
+  (`dbp=10272`) y hay **2424–2647 draws con `tbp0=10272`**. `FUN_0083d430` y `FUN_0083d6b0` existen
+  (candidatos a Title Screen / menú).
+- ❌ **Su diagnóstico de "cache de CLUT desactualizado" NO cierra**:
+  - Los draws del atlas tienen **`cld=1`** (`[glyph-draw] cbp=10300 cld=1 csm=0 csa=0`), y con `cld=1`
+    `LoadClut` **recarga en cada escritura de TEX0** (`case 1: break` → `LoadClutUnlocked`); el `case 4`
+    que Gemini señaló **no se usa**.
+  - **`m_clut` NO está vacío**: `[glyph-draw] m_clut[1]=0xf m_clut[257]=0x0 m_clut[15]=0x349
+    m_clut[271]=0x502` (entrada 1 = `0x0000000F`, entrada 15 = `0x05020349`).
+  - **Forzar la recarga** (`SWORD_CLUT_RELOAD=1`, que ignora el cache y llama a `LoadClutUnlocked` en cada
+    TEX0) **no cambia nada**: `texel=0x0`, `rgbNZ=0`, `vramNonZero=6238`.
+- **Dato nuevo**: los draws del atlas usan **`cbp=10300` → `0x283000`** (page 321 + 0x1000), distinto del
+  `cbp=10268` (`0x281C00`) de la page 320. La entrada 1 de esa paleta queda `0x0000000F` (RGB casi 0,
+  **alpha 0**) ⇒ el texel compuesto sigue siendo 0. En el `GS_vram.bin` real, `0x283000` tiene
+  `nz=361/1024` y sus primeros bytes (`00000000 00000000 00020000 00020000 …`) **no parecen una paleta de
+  colores**.
+- ⇒ **Queda por explicar el muestreo del atlas**: o el `cbp=10300` no es la paleta correcta, o el índice
+  muestreado es 0 (fondo), o el direccionamiento CSM1 de la CLUT está mal. Consulta:
+  `work/gemini/msg_gemini_v77.md`.
+
+### (17) CAUSA CONCRETA: la page 321 de nuestra VRAM es una **COPIA de la page 320** (no el atlas)
+
+- ✅ **Verificado de v77**: `10300*256 = 0x283C00` (mi `0x283000` era aritmética mal); la paleta real en
+  `0x283C00` tiene `entry1 = 0x000F020B`, `entry15 = 0x01000B02`.
+- **Dump de nuestra VRAM** (`SWORD_DUMP_VRAM=/tmp/our_vram.bin`, present #900, con Cross forzado) vs
+  `GS_vram.bin`:
+  - **Page 320: byte-idéntica (8192/8192)** ✓ (`our nz=3119` = `real nz=3119`).
+  - **Page 321: sólo 3196/8192 bytes iguales**, `our nz=3119` vs `real nz=3188`.
+    - `0x282000` (inicio): nuestro `005a005a005a005a001c451c481c451c` = **el patrón de la page 320**;
+      real `00000000000100000002000000030000` (datos de glifos).
+    - `0x283C00` (CLUT de `cbp=10300`): nuestro `000000000f0000003a0202042020201c` =
+      **la paleta de 10268** (`entry1=0x0000000F`, `entry15=0x05020349`, idéntica a `0x281C00`);
+      real = `entry1=0x000F020B`.
+  - `0x281C00` (CLUT de `cbp=10268`): **idéntica** en ambos (`entry1=0x0000000F`) ✓.
+- **⇒ La causa concreta**: las subidas a `dbp=10272` (n=6..10, mismas geometrías 32×32/16×16/8×8/8×4/16×16
+  que las de `dbp=10240`) llevan **el mismo payload que las de la page 320**: escriben una **copia de la
+  page 320** en la page 321 (incluida su CLUT). No es un bug de CLUT ni de muestreo: **los datos del atlas
+  no están llegando a VRAM**.
+- **`[sample-diag] su=0 sv=0 rawIdx=0 clutVal=0x0`** (primeras 12 muestras) y `[tex-hist]
+  withNonZeroTexel=0` son consistentes: se muestrea una zona que (en nuestra copia) es 0/transparente.
+- **Nota**: `[clut-load] cbp=10300 vram=0x283c00 e1=0xf` — nuestro runtime **sí** lee `0x283C00`, pero el
+  contenido de esa zona es la paleta de 10268 porque **la page 321 es una copia**. ⇒ `LoadClut` y el
+  decode de `CBP` están **bien**.
+- **Próximo paso**: por qué el upload de `dbp=10272` lleva el payload de la page 320. Consulta:
+  `work/gemini/msg_gemini_v78.md`.
+
+### (18) Inyectar la page 321 real SÍ resuelve los texeles (`withNonZeroTexel` 0 → 1521/1600), pero `rgbNZ` sigue 0
+
+- **PoC nuevo (env-gated)**: `SWORD_INJECT_PAGE321=<GS sin header>` copia la page 321 real
+  (`0x282000..0x284000`) en nuestra VRAM **antes de cada snapshot de present** (en
+  `GSCpuBackend::Present`). Log: `[inject-page321] loaded=8192`.
+- **EFECTO**: `[tex-hist] TOTAL texturedPrims=1600 withNonZeroTexel=1521` (antes **0**) ⇒ con el atlas real
+  en VRAM **los texeles sí resuelven**.
+- **PERO**: `[gs:diag] crt1 (fbp=128): rgbNZ=0 aNZ=151713` **sigue igual**, y con
+  `SWORD_FORCE_VTX_RGB=1` (MODULATE con vértice RGB=1.0 para `tbp0>=10240`) **tampoco cambia**
+  (`withNonZeroTexel=1289/1400`, `rgbNZ=0`). `vramNonZero=6307`. La última `[gs:present]` alterna
+  `fbpDisp1=0`/`ctx=0/8/0`.
+- **Dato que abre la duda**: la paleta real en `0x283C00` tiene `entry1 = 0x000F020B` ⇒ **A = 0x00**; la
+  alpha test (`TEST=0x5002b`: ATST=5 `alpha>=2`) descartaría esos texeles. ¿Cómo renderiza el real?
+  (¿usa otras entradas? ¿la CLUT de los glifos visibles está en otro rango?).
+- **Verificado de v78**: `10300*256=0x283C00` ✓; el "descriptor table" `0x8A42F0` contiene enteros chicos
+  (`0x100,0x140,0x180,0x200`), **no punteros** ⇒ su explicación del `$a3=0` **no está probada**; y la RAM
+  real en `0x00E63000` está **toda en cero** (los glifos no están ahí; sí hay datos tipo índice desde
+  `0xE63660`). Consulta: `work/gemini/msg_gemini_v79.md`.
+
+### (19) v79: paleta 4-bit verificada, pero la normalización NO destraba el RGB
+
+- ✅ **Verificada la estadística de paletas de v79**:
+  - **`0x283C00` (atlas, `cbp=10300`)**: **62/256 entradas con A>0**, con **A en [1,15]** y **RGB ≤ 15**
+    (p. ej. entry8 `0x07000201` = R1 G2 B0 A7; entry9 `0x0F000B00` = R0 G11 B0 A15).
+  - **`0x281C00` (page 320, `cbp=10268`)**: 89/256 con A>0, **A hasta 128 y RGB hasta 236** (paleta normal).
+  - ⇒ La CLUT del atlas tiene valores de 4 bits (sospechoso: ¿es realmente una paleta o datos de glifo?).
+- **PoC `SWORD_UI_COLOR_FIX=1`** (en `combineTexture`, para `tbp0>=10240`: A 1..15 → ×128/15, RGB ≤15 →
+  ×17, vértice RGB 0 → 128, va 0 → 128), junto con `SWORD_INJECT_PAGE321` + Cross + `SWORD_PRESENT_CTX`:
+  **`rgbNZ=0` sigue** (`crt1 (fbp=128): rgbNZ=0 aNZ=151713`), `vramNonZero=6307`,
+  `[tex-hist] withNonZeroTexel=1289/1400`.
+- **Por qué**: las muestras del atlas resuelven a **índice 0 / fondo**:
+  `[sample-diag] su=0 sv=0 rawIdx=0 clutVal=0x70202` (entry0 = `0x00070202`, **A=0**) y
+  `[glyph-draw] … texel=0x70202`. Con A=0 el alpha test (`ATST=5`, `AREF=2`, `AFAIL=KEEP`) descarta el
+  píxel; la normalización sólo actúa si `ta` es 1..15.
+  (Caveat: `[sample-diag]` loguea las **primeras 12 muestras**, que pueden ser de prims de padding; el
+  `withNonZeroTexel=1289/1400` indica que la mayoría de los prims **sí** muestrean texeles ≠ 0.)
+- **Pendiente**: sonda **por píxel** en `WritePixel` para el prim que rasteriza con `tbp0=10272`:
+  `rgba` final, `writesAnything()`, z-test, `fbmsk`, `fbp`; y aclarar si `0x283C00` es paleta o datos.
+  Consulta: `work/gemini/msg_gemini_v80.md`.
+
+### (20) v80: verificado que el TEX0 real del atlas usa `cbp=10336` (page 323) — **nosotros emitimos `cbp=10300`**
+
+- ✅ **Verificado en la RAM real** (`eeMemory.bin` @ `0xA97BB0`): `20050C05DD30A820` decodifica
+  `tbp0=10272 tbw=2 psm=19 tw=7 th=7 tcc=1 tfx=0 **cbp=10336** cpsm=0 csm=0 csa=0 cld=1`.
+  Y `0xA97BB8` = `...06` (el A+D de TEX0). Los otros: `tbp0=10368→cbp=10432` (page 326),
+  `tbp0=10464→cbp=10496` (page 328). ⇒ **el juego real NO usa `cbp=10300`**.
+- **Nuestros draws del atlas**: `[glyph-draw] cbp=10300 … texel=0x70202` ⇒ pedimos la paleta en
+  `0x283C00` (que en la page 321 es **datos de glifo**, no paleta) ⇒ entry0 = `0x00070202` (**A=0**) ⇒
+  alpha test descarta ⇒ `rgbNZ=0`.
+- **PoC de v80 implementado** (`SWORD_INJECT_UI_VRAM=<GS sin header>`): inyecta las **11 páginas**
+  (`0x280000..0x296000`, **90112 B**) + invalida `m_texturePageCache`/`m_clutCbp`. Log:
+  `[inject-ui-vram] loaded=90112`, `copiadas 11 paginas + caches invalidados`, `vramNonZero=24293`.
+  **NO cambia el resultado**: sigue `cbp=10300`, `texel=0x70202`, `rgbNZ=0` ⇒ **inyectar VRAM no cambia el
+  `CBP` que el juego pide**.
+- **⇒ El objetivo ahora es el `CBP`**: nuestro motor pide `+28` bloques (10272+28=10300) donde el real pide
+  `+64` (10272+64=10336, page 323). Es coherente con que **la subida a `dbp=10272` sea una copia del asset
+  de la page 320** (mismo layout +28). Hay que encontrar **quién calcula el `CBP`/dónde se sube el CLUT del
+  atlas**. Consulta: `work/gemini/msg_gemini_v81.md`.
+
+### (21) v81: descriptores verificados y `CBP` forzado a 10336 — el texel pasa a 0 (índice 0), `rgbNZ` sigue 0
+
+- ✅ **Verificado de v81 en la RAM real**:
+  - Tabla `0xA95650` (registros de 12 B `{desc, vram, size}`): entry0 `desc=0xE80090, vram=0xA0000,
+    size=0x800`; entry1 **`desc=0xE702E0, vram=0xA0800, size=0x1800`**; entry2 `0xE6BBE0/0xA2000`;
+    entry3 `0xE76D60/0xA3800`; entry4 `0xE749E0/0xA4800`.
+  - Descriptor chrome `0xE80090` `+0x3C` → `tex0 = 0x200503859930A800` (**tbp0=10240 tw=6 th=6 cbp=10268**).
+  - Descriptor fuente `0xE702E0` `+0x3C` → **`0x20050C05DD30A820`** (**tbp0=10272 tw=7 th=7 cbp=10336**).
+  - Magic `0x573ABCDE` presente (2530 ocurrencias).
+- **PoC `SWORD_FORCE_FONT_CBP=1`** (en el handler de `TEX0`: si `tbp0==10272 && cbp==10300` → `cbp=10336`),
+  junto con `SWORD_INJECT_UI_VRAM` (11 páginas) + Cross + `SWORD_PRESENT_CTX`:
+  `[force-cbp] tbp0=10272 cbp 10300 -> 10336 (page 323)` ✓ aplicado; `[glyph-draw] cbp=10336 … texel=0x0`
+  (antes `0x70202`). **Pero `rgbNZ=0` sigue** (`crt1 (fbp=128): rgbNZ=0 aNZ=151713`), `vramNonZero=24293`.
+- **Lectura**: con la paleta correcta, el **índice muestreado es 0** → entrada 0 = transparente
+  (así es también en la paleta real) ⇒ alpha test descarta. ⇒ **El problema ahora es que los draws del
+  atlas muestrean índice 0** (¿coordenadas UV en zona vacía? ¿textura no en la page 321 real?).
+- Consulta: `work/gemini/msg_gemini_v82.md`.
+
+### (22) CONFIRMADO: nuestro motor usa el descriptor de CHROME (64×64) para el atlas
+
+- **TEX0 crudo que emite nuestro juego** (`[force-tex0] raw …`): **`0x200507859930A820`** →
+  `tbp0=10272 tbw=2 psm=19 **tw=6 th=6** cbp=**10300** cpsm=0 cld=1`.
+  Es **el TEX0 del descriptor de chrome** (`0x200503859930A800`, tbp0=10240/tw=6/th=6/cbp=10268) **con el
+  `tbp0` parcheado**. El descriptor real de la fuente (`0xE702E0`) es **`0x20050C05DD30A820`**
+  (`tw=7 th=7` = 128×128, `cbp=10336`).
+  ⇒ **Confirmada al 100% la explicación de v81**: el gestor de texturas no registró `fnt_on_*` y usó el
+  fallback de chrome (64×64) para `tbp0=10272`.
+- **PoC de v81 (`SWORD_FORCE_FONT_CBP`)**: forzando el **TEX0 completo** (`0x20050C05DD30A820`) +
+  `SWORD_INJECT_UI_VRAM` (11 páginas reales) + Cross + `SWORD_PRESENT_CTX`:
+  `[force-tex0]` aplicado, `[glyph-draw] cbp=10336`, pero **`texel=0x0`** y **`rgbNZ=0`** siguen
+  (`crt1 (fbp=128): rgbNZ=0 aNZ=151713`).
+- **Caveat**: `[glyph-draw]` loguea los **primeros 8 prims** (probablemente padding, `su=sv=0`); no sirve
+  para concluir sobre los prims que dibujan. Falta la sonda **por píxel filtrada a `texUf/texVf != 0`**.
+- Consulta: `work/gemini/msg_gemini_v82.md`.
+
+### (23) Objetivo redefinido (usuario): **ver la pantalla del selector y controlarla con el pad**. Dos hallazgos
+
+- **(a) El pad del host NO llega al juego.** Corrida con `SWORD_PAD_PRESS=cross SWORD_PAD_TOGGLE=1`
+  (el harness de `ps2_pad.cpp`, el mismo camino que el teclado) **sin** `SWORD_CONFIRM_MENU`:
+  `[confirm-menu]` = **0** y **`t3sub` se queda en 10** (`f=1650`). ⇒ El `PSPadBackend::readState`
+  (mapeo X/Space=Cross, flechas, Enter=Start) **no es lo que lee `func_51C7C0`**; el juego lee el pad por
+  **libpad/padman (IOP)**, no por el stub HLE. ⇒ **"usar el pad" todavía hay que cablearlo** (hook de
+  `func_51C7C0` o el camino real de libpad).
+- **(b) TODAS las prims texturizadas tienen ST variable… y NINGUNA muestrea un texel ≠ 0.**
+  `[tex-hist] TOTAL texturedPrims=800 withNonZeroTexel=0 **stVaryPrims=800
+  stVaryWithNonZeroTexel=0**`. O sea: las UV **sí** varían en las 800 prims, pero el lookup devuelve 0
+  en todas.
+  - Como la **page 320 es byte-idéntica al real** (8192/8192) y tiene 3119 bytes ≠ 0, que **miles** de
+    muestras den 0 es estadísticamente imposible salvo que el **direccionamiento PSMT8 esté mal**.
+  - **Nuevo sospechoso principal (bug del runtime, no de assets)**: `ReadTextureVramUnlocked(P8, …)`.
+    (El de CLUT/CT32 funciona: `m_clut` coincide con `0x281C00` del real.)
+- **Nota de método**: mi conclusión previa "ST degenerado" era **falsa** — venía de mirar 1 prim; el
+  agregado dice `stVaryPrims=800/800`.
+- **Hito del usuario**: ver el selector + controlarlo. Requiere (a) cablear el pad y (b) arreglar el
+  muestreo PSMT8. **Próximo paso (nuestro, no de Gemini)**: verificar el direccionamiento PSMT8
+  (`ReadTextureVramUnlocked(P8)`) contra PCSX2 (`GSLocalMemory::m_psm[PSM_T8]`) usando la page 320
+  (que es byte-idéntica al real): si la fórmula difiere, es un **bug del runtime** y explicaría el
+  `texelNZ=0` universal.
+
+### (24) v82 verificado/refutado; y **el chrome (page 320 nativa) también da texel 0**
+
+- ✅ **Verificado**: la tabla de los 16 primeros colores de la page 323 (`0x286000`) de v82 es **exacta**
+  (`e0=0`, `e1=0x26000000`, `e2..e15` con A=128, `e15=0x80F3F3F3`).
+- ❌ **REFUTADO su "desfase de 425 B"**: el PoC **no** lee `GS.bin` con header. Se pasa
+  `SWORD_INJECT_UI_VRAM=/tmp/GS_vram.bin` = **4194304 B exactos** (header ya quitado con `dd skip=425`;
+  el comentario del código dice `<GS sin header>`). `work/teleport/GS.bin` = 4194813 = 4 MB + 509
+  (425 header + 84 cola). Con el archivo sin header, `fseek(pf,0x280000)` cae **exacto** en VRAM
+  `0x280000` ⇒ **alineado** (`[inject-ui-vram] loaded=90112`). ⇒ **El `texel=0` no viene del desplazamiento.**
+- 🔑 **Dato decisivo**: los prims de **`tbp0=10240` (page 320, byte-idéntica al real)** también dan
+  `texelNZ=0` ⇒ **el problema no es la inyección ni la paleta: es la lectura de textura / el índice**.
+- **Corrección de un error mío**: "ST degenerado" era **falso**; el agregado dice
+  `stVaryPrims=800/800` (todas las prims texturizadas tienen ST variable) pero
+  `stVaryWithNonZeroTexel=0` (ninguna muestrea ≠ 0).
+- `[uv-probe]` (6 prims): `fst=0` con **`s0=s1=s2=0`** y **`u=0x3400 v=0x3ae0`** poblados. En PCSX2,
+  `fst=0` ⇒ STQ (floats) — verificado en `GS/GSLzma.h:188`; nuestro decode de `fst` (bit 8,
+  `GS/GSRegs.h:706-715`) es **correcto**. ⇒ muestreamos **ST=0** ⇒ texel (0,0) ⇒ índice 0 ⇒ descarte.
+- **Consulta milestone-oriented**: `work/gemini/msg_gemini_v83.md` (ver el selector + cablear el pad).
+
+### (25) v83: Resolución de `fst=0` vs STQ, auditoría PSMT8 y cableado canónico del pad host
+
+- **Misterio de `fst=0` y `uv=0x3400/0x3ae0` resuelto**:
+  - En `gs_frontend.cpp`, los campos `m_curU` y `m_curV` retienen valores residuales de arranque cuando no se emite el registro UV. Con `fst=0`, el juego usa **exclusivamente STQ** (registro 2). El valor UV residual impreso en el log era inerte.
+  - La sonda `[uv-probe]` se agotó tras 6 vértices degenerados de padding `(xyz=(2048,2048), s=t=0)`. En los triángulos reales posteriores (#2, #3, #4...), los vértices traen ST de coma flotante variable ($s \approx 0.48633, t \approx 0.0117187$).
+- **Por qué el chrome (page 320) dio texel=0**:
+  - Para el triángulo #3, los 261 fragmentos rasterizados muestrean $(\text{sampleU}=31, \text{sampleV}=0)$ de forma mono-punto.
+  - En `/tmp/GS_vram.bin` en la página 320 (`0x280136`), el índice en $(31, 0)$ es `0x00`. En la CLUT de la página 320 (`cbp=10268`), la entrada 0 es `0x00000000` (Alpha=0). Con `ATST=5, AREF=2`, el fragmento es descartado.
+- **Auditoría PSMT8 vs PCSX2**:
+  - `ps2_gs_psmt8.h` (`PageExtent`, `BlockExtent`, `ColumnTable8`, `BlockTableP8`, wrap/clamp) es **idéntico término a término** a `GSLocalMemory.cpp`. La lógica de direccionamiento PSMT8 del runtime es 100% fiel al hardware y a PCSX2.
+- **Arquitectura de Pad y Cableado Natural**:
+  - Desensamblado de `func_51C7C0` (`thunk_FUN_0051e700_0x51c7c0.cpp` / `FUN_0051e700`): el juego lee `lhu $s0, 0x2($s0)` donde `$s0 = *(0x00A42500) = 0x00A42100` (buffer de puerto 0 en `0x00A42102`) y retorna en `$v0`.
+  - Los botones retornados en `$v0` son **active-high**: Cross = `0x0040`, Circle = `0x0020`, Square = `0x4000`, Triangle = `0x1000`, Up = `0x8000`, Down = `0x2000`, Left = `0x0002`, Right = `0x0008`, Start = `0x0004`, Select = `0x0001`.
+  - `FUN_0083d990` (`sub=10`): línea 605 comprueba `andi $v0, $v0, 0xA000` (Up/Down para alternar 50Hz/60Hz con sonido `0x62DD60(0x7D)`), y línea 727 comprueba `andi $v0, $v0, 0x0040` (Cross para confirmar).
+  - Implementación: `thunk_FUN_0051e700_0x51c7c0.cpp` llama a `runtime->padBackend().readState(0, 0, padData, sizeof(padData))`, traduce los bits active-low a la máscara del motor, actualiza `0x00A42102` y retorna en `$v0`.
+- **Invalidación de caches de VRAM**:
+  - Eliminado el guard `<= 3u` en `gs_cpu_backend.cpp:2237` para asegurar que `m_texturePageCache.Invalidate()` y `m_clutCbp.fill(0xFFFFFFFFu)` se ejecuten en cada present durante inyección.
+
+### (26) v83 verificado en vivo: el **pad SÍ funciona** (control ✅), pero el "fix" de redondeo de texel es **incorrecto** (refutado con PCSX2) y `rgbNZ` sigue 0
+
+- ✅ **CONTROL (hito) — verificado en vivo**: con `SWORD_PAD_PRESS=cross SWORD_PAD_TOGGLE=1` y **sin**
+  `SWORD_CONFIRM_MENU` (count = 0): `[pad-host] port=0 buttons=0x40` y el selector
+  **`t3sub` 10 → 11 → 0** (`f=270`, `f=430`). ⇒ El cableado del pad en
+  `thunk_FUN_0051e700_0x51c7c0.cpp` (lee `padBackend().readState`, escribe `0xA42102`, retorna en `$v0`)
+  **funciona por el camino real del motor**. **La mitad "controlar" del hito está hecha.**
+- ❌ **REFUTADO el "fix" de muestreo nearest** (`floor(texUf + 0.5f)` en `gs_cpu_backend.cpp:1214`):
+  en PCSX2 `GS/Renderers/SW/GSDrawScanline.cpp:835-844` el sesgo de medio texel
+  (`u -= 0x8000`) se aplica **solo** bajo `if (sel.ltf)` (bilinear), y el texel se deriva con
+  `uv0 = u.sra32<16>()` = **shift aritmético = truncamiento**, sin redondeo. Nuestra versión original
+  (`static_cast<int>(texUf)`) era **la correcta**; sumar 0.5 = **desplazamiento de medio texel**
+  (dibuja lo que el real descarta). **Revertido** con el comentario que cita a PCSX2.
+- ✅ **Verificado de v83 (datos)**: la fila `y=0` de la page 320 tiene **2/64** no-cero vs **50-55/64** en
+  `y=1..4`; `(31,0)=0x00` vs `(31,1)=0x45`; `CLUT(cbp=10268) e0=0x00000000, e69=0x05020376` (coincide
+  exacto con lo que afirmó). Y en el log en vivo `/tmp/sword_etheria_v84_test.log`: `texelNZ=256` (×6) y
+  `aNZ=246080` sí ocurrieron.
+- ⚠️ **Pero su atribución causal era errónea**: tras **revertir** el redondeo, `withNonZeroTexel` volvió a
+  0 y **`aNZ=246080` sigue apareciendo** ⇒ los 246080 píxeles con alpha **no** vienen del muestreo sino del
+  **velo de fade** (quad sin textura, vértice RGB=0, alpha≠0 ⇒ negro con alpha). O sea: el "fix" no aportaba
+  nada visible (`rgbNZ=0` en ambos casos) y sí dibujaba píxeles que el real descarta.
+- **Estado del hito**: **CONTROL ✅** / **VER ❌** — bloqueado por la lista de UI vacía (ver §(27)).
+- **Fragilidad a anotar**: el cableado del pad vive en `work/generated/thunk_..._0x51c7c0.cpp`, que es
+  **gitignored y se regenera desde el CSV** ⇒ se pierde al regenerar. Debería moverse a un override del
+  runtime (`game_overrides.cpp` / `replaceFunction`) para que sea durable.
+
+### (27) MEDIDO: la lista de UI (`0xA88874`) está **vacía** en el selector — y también en el real está "viva"
+
+Sonda nueva en el frame-hook (`game_overrides.cpp`, junto a `[task]`): `uiNext` (campo `+0` del centinela
+`0xA88874`) y `uiCount` (recorrido de la lista doble).
+
+```
+f=1   sub=0 t3sub=0   uiNext=0xcb6418 uiCount=10
+f=3   sub=0 t3sub=0   uiNext=0xa88874 uiCount=0
+f=20  sub=1 t3sub=1   uiNext=0xa88874 uiCount=0
+f=50  sub=2 t3sub=3   uiNext=0xe1f4b8 uiCount=1
+f=90  sub=1 t3sub=1   uiNext=0xa88874 uiCount=0
+f=400 sub=1 t3sub=0   uiNext=0xa88874 uiCount=0
+```
+
+- **Hecho medido**: la lista **se puebla al arrancar (10 objetos)** y luego **se vacía**; en el selector
+  (`t3sub=10`) queda **vacía** (`uiCount=0` en 40 muestras). ⇒ `FUN_0083d290` itera 0 objetos ⇒ sólo se
+  emite el velo (coincide con `rgbNZ=0`, `aNZ>0`).
+- **En el real** (`eeMemory.bin`): centinela `0xA88874` → `next=0x00CB5818`, `prev=0x00E8C058` ⇒ **6 objetos**
+  (verificado). ⇒ Los objetos del selector **no se crean/enlazan** en nuestro run.
+- **CONTROL ✅ / VER ❌**: el hito queda a un solo eslabón (creación de los objetos de UI del selector).
+- Consulta: `work/gemini/msg_gemini_v84.md`.
+
