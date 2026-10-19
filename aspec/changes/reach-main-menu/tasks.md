@@ -1,6 +1,14 @@
 # Tasks: reach-main-menu
 
 > Estado 2026-10-09. Entrada: **`HANDOFF.md`**. Se podaron las tareas superseded para no inducir a error.
+>
+> ⚠️ **2026-10-17 — este archivo es un LOG POR SESIÓN (histórico).** Las mediciones de cada sesión valen
+> para su fecha. En particular, las líneas que dicen **`vramNonZero=0` / "sigue negro" por falta de
+> dibujo** quedaron desactualizadas: hoy `vramNonZero` sube a **368801/475456**, la geometría **llega al
+> GS** (`[vif1-chain]`, `[gs:kick] drawing=1 pc=0x6e4468`) y el problema es **qué página se presenta**.
+> Fuente vigente: `decisions.md` §2026-10-17 + §"Artefactos de medición".
+> Lo que **sí** sigue válido de acá: el `SWORD_TEST_PATTERN` prueba que **el present funciona** (se ve un
+> gradiente forzado) ⇒ si la pantalla está negra no es el display roto, sino **qué VRAM lee**.
 
 ## Hecho
 
@@ -124,3 +132,63 @@
   **allocador `FUN_004c3000`**. No hay path de DMA/CD/runtime que escriba esa región.
 - Rebuild completo con `ps2TraceGuestWrite` para "encontrar al escritor" → **innecesario** (el escritor ya
   está enumerado) y caro (18 311 `.cpp`).
+
+---
+
+## Sesión 2026-10-17 (noche) — TEXTURAS: el eslabón es el gestor de UI, no el GS
+
+> Mediciones vigentes en `decisions.md` §rondas 16-20. **No re-descubrir**: el camino GS/A+D/DMA del
+> runtime está **probado byte a byte** contra el real y es correcto; el estado del gestor de texturas
+> (`0xA887B8`) es byte-idéntico al real salvo 3 palabras; lo que falta es la **lista de 6 objetos de UI**
+> cuyo centinela vive en `0xA887B8+0xBC` (`0xA88874`), que en nuestro run está vacía y **nunca se escribe**.
+
+- [ ] **Trazar la entrada de las funciones del cluster de la clase** (`0x6d6290`, `0x6d6310`, `0x6d6390`,
+      `0x6d6410`, `0x6d6490`, `0x6d6510`, `0x6d67a8`, `0x6d68a0`, `0x6d6a80`, `0x6db0d0`) y ver cuál **no** se
+      ejecuta en nuestro run. Método que ya funcionó: `SWORD_TRACE_BRANCH=<entrada>-<entrada+1>` y leer
+      `src=` (el caller) en `/tmp/sword_branch.log`.
+- [ ] **Identificar la función que *enlaza* la lista** (la que escribe `next`/`prev` del centinela).
+      Pista: el centinela real tiene la vtable de la clase en `+8/+0xC/+0x10`
+      (`0x004c6568`/`0x004cb430`/`0x004c6c20`) ⇒ el constructor de la clase instala eso; buscarlo por los
+      inmediatos (`addiu …, 0x6568` = 25960, y pares `lui 0x4C`; ver `FUN_006d13a0`, que es *otro* instalador:
+      corre 1 vez pero no toca el centinela).
+- [ ] **Comparar por contenido** (no por dirección: el heap está corrido **+0x150**) si los 6 objetos existen
+      desenlazados en nuestro dump o no existen. Firma: floats `0x3F800000` (1.0) y `0x3F7FFFFF` en `+8`,
+      paso de **0x280** entre nodos en el real (`0xE8C058 → 0xE8C2D8 → 0xE8C558`), más `0xE81F18`,
+      `0xCB6028`, `0xCB5818`.
+- [ ] **Si el bloqueo es de datos del motor y no se resuelve leyendo**: pedir consulta a Gemini con el
+      protocolo de `work/START_NEXT_SESSION.md` §Protocolo Gemini (contexto de trabajo en el primer mensaje;
+      el usuario hace de proxy). Candidata: `work/gemini/msg_gemini_v70.md`.
+- [ ] **Verificar el hito**: `[gs:diag] crt1 … rgbNZ > 0` (y, cuando ocurra, subir `main` del repo del juego).
+
+## Plan de producto (definido 2026-10-15 — NO implementar aún)
+
+> Estos items quedan planificados; se ejecutan al cerrar el hito del menú. Ver `proposal.md`
+> §"Producto final" y `design.md` §"Producto final — arquitectura".
+
+**Hito actual (sigue siendo lo prioritario)**
+
+- [ ] **Frame presentado con `nonZeroRgb > 0`** con los triages apagados (menú visible).
+- [ ] Cerrar los `missing-target` restantes clasificándolos con el mismo criterio
+      (**referenciados** de verdad: JAL/J/branch/tabla/vtable) y NO por cercanía a un epílogo.
+
+**Launcher (entregable propio)**
+
+- [ ] Definir el alcance de la UI (resolución, fullscreen, escalado, vsync/FPS, audio, pad).
+- [ ] Selector de ISO + validación MD5 (reutilizar `check_iso` de `build_release.py`).
+- [ ] Persistencia del config (`%APPDATA%` en Windows, `~/.config` en Linux) compartido con el juego.
+- [ ] Acción **Generar** (invoca `build_release.py --iso`, con progreso/log visible).
+- [ ] Acción **Jugar** (lanza `sword_etheria --config <archivo>`).
+- [ ] Empaquetado por plataforma (Windows + Linux) en el release por tag `v*`.
+
+**Reproducibilidad y calidad**
+
+- [ ] `game/generate_functions_csv.py`: reproducir el CSV desde el ELF + reglas (baseline, overrides,
+      splits, clamps, filtro de referencias, altas puntuales como `FUN_006f2630`).
+- [ ] Mover `work/validate_csv.py` a `game/` y agregarlo como **paso del CI** (gate antes del build).
+- [ ] Documentar el modelo de contenido (el ISO se necesita **también para jugar**; el repo no lleva
+      nada con copyright).
+
+**Deuda declarada (a revisar con el juego completo)**
+
+- [ ] Fidelidad del runtime: revisar los overrides por dirección de `game_overrides.cpp`.
+- [ ] Alcance funcional completo (gameplay, audio, cinemáticas, guardado) por fases.

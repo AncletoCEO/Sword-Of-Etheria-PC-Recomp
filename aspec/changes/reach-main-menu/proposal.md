@@ -1,10 +1,15 @@
 # Proposal: reach-main-menu
 
-> **ENTRADA VIGENTE: `HANDOFF.md`.** Este proposal se conserva, pero sus hipótesis de foco
-> (`sema 8`, state machine de escena, RPC sin réplica, watchpoint) quedaron **superseded**. El gate real
-> (2026-10-09) es un **wait cruzado** en la fase de carga: ver `HANDOFF.md` §7–§8.
-> La afirmación de abajo de que "el juego ejecuta su lógica, no gira en un loop" resultó **incorrecta**: el
-> recomp queda **congelado** en la fase de carga (ver `decisions.md`).
+> ⚠️ **HISTÓRICO (2026-10-15).** Para el estado vigente: **`decisions.md` §2026-10-15** y el bloque
+> "ESTADO ACTUAL" de `HANDOFF.md`. Resumen: el **arranque y el render están desbloqueados** (VRAM ~475 KB,
+> `dma` ~1.700, `activeThreads=3`, CI en verde); el bloqueo restante es que el **frame presentado sigue
+> negro** (el juego dibuja el fade/clear). Las hipótesis de foco del texto de abajo (`sema 8`, RPC sin
+> réplica, state machine, watchpoint) están **superseded**; ver `decisions.md` ("Descartado").
+>
+> **ENTRADA VIGENTE: `HANDOFF.md`** (con su bloque de estado actual). Este proposal se conserva como
+> registro; sus hipótesis de foco quedaron **superseded**. El gate real (2026-10-09) fue un **wait
+> cruzado** en la fase de carga: ver `HANDOFF.md` §7–§8. La afirmación de abajo de que "el juego ejecuta
+> su lógica, no gira en un loop" resultó **incorrecta** (ver `decisions.md`).
 
 ## Problem
 
@@ -75,3 +80,31 @@ Desbloquear el **avance de fase** para llegar al **menú**:
   momento): *mitigación*: confirmar primero que el state machine depende de esa respuesta.
 - **Falsa señal de éxito** (avanzar por un parche): *mitigación*: exigir avance con los triages
   apagados y `nonZeroRgb>0` en el frame.
+
+## Producto final (definido 2026-10-15, planificación — no implementado)
+
+Objetivo de producto: **el juego completo**, jugable en **Windows y Linux**, distribuido por
+**GitHub Releases**, y que **cualquiera con su ISO** pueda generarlo sin vueltas. Puntos acordados:
+
+1. **Juego completo** (no sólo el menú). El alcance por fases se define cuando se cierre el hito del
+   menú; la fase actual sigue siendo llegar al menú.
+2. **Fidelidad vs. parches**: se mantiene el criterio actual (overrides por dirección en
+   `game_overrides.cpp`). La revisión de fidelidad queda **declarada como deuda** para cuando el juego
+   esté completo.
+3. **Plataformas**: Windows + Linux. CI ya compila las tools en ambos.
+4. **Distribución**: GitHub Releases por tag `v*`, con el launcher, las tools y `build_release.py`.
+5. **Modelo de contenido (sin copyright en el repo)**: el repo **no** distribuye ISO, ELF, assets ni el
+   C++ recompilado (todo en `.gitignore`). El usuario aporta su ISO, validado por MD5
+   (`b9c5115b77b7f05fbf14a67df8d3f99d`). **El ISO es necesario también en runtime** (los assets se leen
+   del CD): el launcher debe persistir su ruta y usarla para *generar* y para *jugar*.
+6. **Launcher** (entregable propio): pide el ISO una vez, expone **opciones configurables**
+   (resolución, escalado, vsync, audio, pad), escribe el config y lanza el juego. Flujo:
+   `elegir ISO → validar MD5 → (generar si falta) → jugar`.
+7. **Reproducibilidad**: el CSV de funciones es un **input de build**; se versiona, pero con un
+   **generador reproducible** en `game/` (reglas: overrides, splits, clamps, filtro de referencias) para
+   que los cambios sean revisables en diff y sin depender de Ghidra.
+8. **Calidad**: mover `validate_csv.py` a `game/` y correrlo como **paso del CI** (gate
+   `0 SHADOW / 0 MIDFUNC / 0 MISSING`) antes de cualquier build.
+
+**Out of scope ahora**: implementar el launcher, el generador o el gate (se hace al cerrar el hito del
+menú). Este apartado fija el **qué** para no re-decidirlo después.

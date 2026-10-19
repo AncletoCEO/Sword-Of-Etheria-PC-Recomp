@@ -86,10 +86,12 @@ def main() -> None:
             print(f"tools en {head.stdout.strip()}, pineando a {PS2RECOMP_PIN}...")
             run(["git", "checkout", PS2RECOMP_PIN], cwd=args.tools)
     else:
-        run(["git", "clone", "https://github.com/ran-j/PS2Recomp.git", args.tools])
+        # El runtime se clona del FORK (no del original ran-j/PS2Recomp): el fork es
+        # el que tiene los parches del juego ya incluidos en el commit pineado.
+        run(["git", "clone", "git@github.com:AncletoCEO/Ps2Recomp-of-etheria.git", args.tools])
         run(["git", "checkout", PS2RECOMP_PIN], cwd=args.tools)
-    run([sys.executable, os.path.join(REPO_ROOT, "game", "apply_patches.py"),
-         "--tools", args.tools])
+    # game/apply_patches.py quedo obsoleto: los parches viven en el fork pineado
+    # (el CI tampoco lo corre).
     # A2: fuente de verdad game/ -> work/build-game/ (dev).
     run([sys.executable, os.path.join(REPO_ROOT, "game", "sync_work.py")])
 

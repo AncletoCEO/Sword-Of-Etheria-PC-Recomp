@@ -1,15 +1,27 @@
 # Continuar — reach-main-menu
 
-> **Punto de entrada vigente: `HANDOFF.md`** (estado definitivo, herramientas, descartado y próximo paso).
+> **Prompt de arranque vigente: `CONTINUE_PROMPT.md`** (en esta misma carpeta; idéntico a
+> `work/START_NEXT_SESSION.md`, que está fuera de git). Pegarlo al inicio de la sesión nueva y arrancar con
+> **`/cleto-apply reach-main-menu`**. Incluye el estado verificado al 2026-10-17 (noche), las tareas
+> pendientes de `tasks.md` y el **protocolo para pedir consultas a Gemini**.
 >
-> Este archivo antes acumulaba el log de sesiones. Se consolidó el 2026-10-09 para evitar ruido: el detalle
-> por sesión quedó en git, el resumen en `HANDOFF.md` y el detalle por evidencia en `decisions.md`.
+> Punto de entrada histórico: `HANDOFF.md` (2026-10-16) y `decisions.md` (evidencia cruda por ronda:
+> **rondas 16-20 del 2026-10-17 son las vigentes**).
 
 ## En 3 líneas
-- El recomp arranca, corre ~58 fps, presenta frames, pero la pantalla sale **negra** (`nonZeroRgb=0`).
+
+> ⚠️ **CORREGIDO 2026-10-17.** Estas líneas eran del 2026-10-09/11 y dos de ellas hoy son falsas:
+> el recomp **no** corre a 58 fps de lógica (VBlank ~58/s pero el *task update* del juego a **~9/s**) y
+> **la geometría sí llega al GS** (`[vif1-chain]`, `[gs:kick] drawing=1 pc=0x6e4468`) con VRAM ocupada
+> (`vramNonZero` hasta 475456). La brecha actual es **qué página se presenta**. Fuente vigente:
+> `decisions.md` §2026-10-17 + §"Artefactos de medición".
+
+- El recomp arranca, presenta frames, pero la pantalla sale **negra** (`nonZeroRgb=0`).
 - El pipeline gráfico **está verificado fiel** (display, GS, parseo GIF, VIF1-UNPACK, VU1, XGKICK, geometría
   y color — incluso contra la consola). El negro **es data del juego** (quads `[0,0,0,255]`).
-- La brecha es **estado de escena/runtime**: el recomp se queda antes de generar el contenido.
+- ~~La brecha es **estado de escena/runtime**: el recomp se queda antes de generar el contenido.~~
+  ⇒ hoy: el contenido **se dibuja** (llega al GS y a VRAM); falta **presentarlo** (la página presentada
+  es la del clear/fade).
 
 ## Actualización 2026-10-10 (sesión color/VU1/staging) — DÓNDE SEGUIR
 
