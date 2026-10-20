@@ -179,11 +179,11 @@
       lo que difiere es el *enlazado* (transitorio: 3593 "clear" y ~900 insert por corrida).**
       ⇒ **El "eslabón de los 6 objetos" es, con alta probabilidad, un artefacto de comparación transitoria**
       (nuestra foto cayó con la lista vacía). NO explica la falta del atlas.
-- [ ] **Si el bloqueo es de datos del motor y no se resuelve leyendo**: pedir consulta a Gemini con el
+- [x] **Si el bloqueo es de datos del motor y no se resuelve leyendo**: pedir consulta a Gemini con el
       protocolo de `work/START_NEXT_SESSION.md` §Protocolo Gemini (contexto de trabajo en el primer mensaje;
       el usuario hace de proxy). Candidata: `work/gemini/msg_gemini_v70.md`.
-      **PREPARADA 2026-10-18**: `work/gemini/msg_gemini_v70.md` (reescrita con el hallazgo nuevo — ver abajo —
-      que refuta el modelo del "runner en bucle"). **Pendiente: el usuario la pega en Gemini.**
+      **HECHO 2026-10-19**: rondas **v70–v85**, todas verificadas contra ELF/RAM/log antes de actuar
+      (resumen y veredictos en `work/gemini/README.md`; detalle en `decisions.md` §(1)–(32)).
 - [ ] **Verificar el hito**: `[gs:diag] crt1 … rgbNZ > 0` (y, cuando ocurra, subir `main` del repo del juego).
       **Sigue rojo 2026-10-18**: `[gs:diag] crt1 (fbp=0): rgbNZ=0 aNZ=0 | crt2 … rgbNZ=0`; sólo hay
       **5 subidas TRXDIR** (todas `dbp=10240` PSMCT32) ⇒ el atlas PSMT8 (`0x282000`–`0x294000`) no llega.
@@ -360,3 +360,54 @@
 
 - [ ] Fidelidad del runtime: revisar los overrides por dirección de `game_overrides.cpp`.
 - [ ] Alcance funcional completo (gameplay, audio, cinemáticas, guardado) por fases.
+
+---
+
+## Sesión 2026-10-19 — CIERRE del change (lo que quedó hecho y lo que pasa al change nuevo)
+
+> Este change se **archiva**. La continuación vive en **`aspec/changes/reach-playable-game/`**
+> (prompt de arranque: `reach-playable-game/CONTINUE_PROMPT.md`).
+
+**Hito redefinido por el usuario y su estado**
+
+- **"Ver el selector de video y controlarlo con el pad"** → **CONTROL ✅ / VER ❌**.
+  - **CONTROL ✅**: cableado del pad del host a `0x51C7C0` (override durable en `game_overrides.cpp`;
+    el thunk generado también lo tiene, temporal). Verificado en vivo: `[pad-host] port=0 buttons=0x40`
+    y **`t3sub` 10 → 11 → 0** **sin** `SWORD_CONFIRM_MENU`.
+  - **VER ❌**: `rgbNZ=0` sigue. La causa **no** es el GS, ni el present, ni los assets.
+
+**Lo que quedó probado (no re-descubrir en la sesión nueva)**
+
+- [x] **Redondeo nearest del GS**: la spec **trunca**. PCSX2 `GS/Renderers/SW/GSDrawScanline.cpp:835-844`
+  aplica el sesgo de medio texel **sólo** bajo `if (sel.ltf)` y deriva el texel con `sra32<16>`. Se
+  **revirtió** el `floor(x+0.5)` (era un desplazamiento de medio texel). El `aNZ=246080` no venía del
+  muestreo sino del **velo de fade**.
+- [x] **La cadena de UI del selector existe y corre**: descriptor Task 3 `0x009C8890`
+  (`+0x10 Init=0x83DFA0`, `+0x14 = 0x83D290`), ctor `0x805550` (corre con `ra=0x83dd80`,
+  **`a2=0xa21418`** = tabla `0x9C8850`, tail-call `0x6d6c40`), `0x804c50` **nunca** corre.
+- [x] **`0x83D290` es el DESTRUCTOR**, no la draw (descriptor `+0x14`). Sus 0 ejecuciones son **correctas**.
+- [x] **El dibujo de UI corre cada frame**: `0x6db0d0` (≈2289/corrida) **llama a `0x6daef0`**
+  (`dispatchGuestBranch(..., 0x6DAEF0u, ...)`), que testea `flags = *(u8*)(widget+3)` bit 0 y recorre la
+  lista de comandos `widget+0x90`. Medido: `[ui-render] visible=1 rlEmpty=0` en los widgets del selector.
+- [x] **Los widgets SÍ se enlazan en `0xA88874`**: `0x6d6a80` hardcodea el centinela; 5374 inserts en la
+  corrida (heads `0xe81d18`, `0xe8c358`, `0xcb5e08`…). El "ClearAll" que creíamos purge es el **flush**.
+- [x] **Lo que falta**: qué hacen los **callbacks de render** (`jalr` en `0x6daf6c` con `*(cmd+0x10)`) —
+  qué primitivas emiten y con qué textura/UV. Ahí está la diferencia con lo que debe verse.
+
+**Estado de las sondas al cerrar (dejar el árbol estable)**
+
+- `game_overrides.cpp`: `padHook51c7c0`, `[ui-clear]`, `[ui-insert]` (+`global=`, `AFTER head=`),
+  `[ui-reset]`, `[ui-widget]` (0x805550/0x804c50), `[ui-draw]` (0x83d290), `[ui-render]` (0x6daef0),
+  `[task]` con `uiNext/uiCount/t3_7c/t3_84`.
+- `work/generated/FUN_0083d290_0x83d290.cpp`: log `[ui-draw-gen]` (**temporal**, se pierde al regenerar).
+- `work/generated/thunk_FUN_0051e700_0x51c7c0.cpp`: cableado del pad (**temporal**, idem).
+- `gs_cpu_backend.cpp`: revert del redondeo + sondas de textura (`[tex-hist]` con `stvary`).
+- `gs_frontend.cpp`: `SWORD_FORCE_FONT_CBP` (PoC, default OFF).
+- **Deuda**: unificar el cableado del pad en un solo lugar durable; limpiar sondas viejas no env-gated.
+
+**Pendiente que se transfiere al change nuevo**
+
+- [ ] Identificar los callbacks de render (`*(cmd+0x10)`) y por qué sus prims no producen color visible.
+- [ ] Título/menú principal navegable (después del selector).
+- [ ] Ritmo (~9 ticks/s vs 58 VBlank), 3D, audio, cinemáticas, guardado.
+- [ ] Launcher + release (plan de producto de más arriba).

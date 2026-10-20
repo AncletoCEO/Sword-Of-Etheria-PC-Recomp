@@ -1820,3 +1820,109 @@ f=400 sub=1 t3sub=0   uiNext=0xa88874 uiCount=0
 - **CONTROL ✅ / VER ❌**: el hito queda a un solo eslabón (creación de los objetos de UI del selector).
 - Consulta: `work/gemini/msg_gemini_v84.md`.
 
+### (28) v84 verificado: la cadena de UI y los strings son correctos, pero su "breakthrough" **no está probado**
+
+- ✅ **Verificado**: los strings del ELF están **exactos** en las direcciones que dio
+  (`0x9C7E50` → `"Select video format. \nCurrently display is PAL (50Hz)."`, `0x9C7EC0` → `"NTSC(60Hz)"`,
+  `0x9C7EE0` → `"PAL(50Hz)"`, con `offset = vaddr − 0x4C0000 + 0x100`) y las sondas existen
+  (`padHook51c7c0`, `[ui-insert]`, `[ui-clear]`, `[ui-reset]`, `t3_7c`).
+- ✅ **Las sondas disparan**: `[ui-insert]` ×24, `[ui-clear]` ×32 (`ra=0x6d51d4`).
+- ❌ **Pero su corrida "en vivo" no llega al selector**: `/tmp/sword_etheria_v84_test2.log` termina en
+  **f=20** (última línea `[task] f=20 … t3sub=1`; **no hay ninguna muestra con `t3sub=10`**). ⇒ El
+  "ciclo de reset continuo que purga la UI" **no está establecido**: los inserts/clears observados son de
+  arranque (consistente con el `ClearAll` conocido en `f=3`).
+- ❌ **`[ui-reset]` nunca dispara** (count=0). **Causa encontrada**: `FUN_006d51b0` se entra por
+  **fallthrough** desde `0x6d5158` (`// Address: 0x6d5158 - 0x6d51b0`, que hace
+  `ctx->pc = 0x6D51B0u`), no por `jal` ⇒ `replaceFunction(0x6d51b0)` **no intercepta la entrada**. Y
+  `0x6d5158` **no tiene ningún call site directo** en el generado ⇒ se invoca indirectamente (jalr/vtable).
+  ⇒ Para verlo hay que hookear `0x6d5158` (inicio del chunk) o volcar la pila.
+- ⚠️ **Corolario**: por el mismo motivo, **no está probado que el override del pad esté vivo** (el thunk de
+  `work/generated` sigue editado; el comportamiento observado podría venir de ahí). Para verificarlo: dejar
+  el thunk original y correr de nuevo (o usar un tag de log distinto).
+- **Pendiente para cerrar el diagnóstico**: corrida **completa** (hasta `t3sub=10`) con las sondas, para ver
+  si hay `[ui-insert]` estando en el selector y si un `[ui-clear]` lo sigue.
+
+### (29) CORRIDA COMPLETA (f=2280): el selector se alcanza en f=200 y **la lista `0xA88874` sigue vacía**; los inserts van a **otros managers**
+
+Corrida completa (170 s, **sin** pad), binario reconstruido con las sondas de Gemini:
+
+- El selector (`t3sub=10`) se alcanza en **f=200** y se mantiene hasta f=2280: **209 muestras, todas
+  `uiCount=0`** (`uiNext=0xa88874`). Además `t3_7c=0x0`, `t3_84=0x0` (los punteros de contenedor/capas que
+  Gemini esperaba no nulos están en 0).
+- `[ui-insert]` **×122**, y **ocurren durante todo el selector** (f=200…2280, ~1 cada 10-30 frames) —
+  **pero los managers destino son `0xe8c0d0`, `0xe8c350`, `0xe8be50`, `0xcb5e00`, `0xcb55e0`, `0xe82170`,
+  `0xe83210`; NUNCA `0xA88874`**. ⇒ Las insercciones son reales, pero no en la lista que vigila
+  `FUN_0083d290` (o `0xA88874` no es la lista del selector en nuestro heap).
+- `[ui-reset]` **×99** (ahora sí dispara tras el rebuild) con **`a0=0xcb5330 ra=0x7569e4`**, y cada reset va
+  seguido de `[ui-clear] ra=0x6d51d4` (dentro de `FUN_006d51b0`). ⇒ **Hay un reset periódico** (cada ~23
+  frames) cuya función llamadora está en la región **0x756xxx** (archivos `entry_00756*`), sin call site
+  directo ⇒ se invoca indirectamente.
+- **Ni A ni B quedan probadas**: A (los widgets nunca entran a `0xA88874`) es lo que muestran los datos; B
+  (purga) no se puede descartar mientras el reset periódico exista.
+- **Hipótesis de dirección a verificar**: en el real el manager está en `0xA887B8` y el centinela en
+  `0xA887B8 + 0xBC = 0xA88874`. Si los `[ui-insert]` van a managers `0xe8xxxx`, su centinela estaría en
+  `a0 + 0xBC`. **Próxima sonda**: en `0x6d6a80`, loguear `a0+0xBC` (next/prev) y si `a0 == 0xA887B8`;
+  y hookear `0x00805550` / `FUN_00804c50` (el constructor de widgets) para ver si corre y si sale por el
+  `beqz $a0` de `0x804c98`.
+
+### (30) El constructor de widgets **SÍ corre** (Hipótesis A refutada); `0xA88874` no es el destino
+
+Sondas nuevas (en `0x6d6a80`: `global=` si `a0==0xA887B8`, y `a0+0xBC` next/prev; hooks en `0x805550` y
+`0x804c50`). Corrida completa (f=2220, selector estable):
+
+- ✅ **`0x805550` SÍ entra, dos veces**:
+  ```
+  ENTER a0=0xe20bd0 a1=0x40     a2=0x0       ra=0x83d06c   EXIT pc=0x6d6c40 v0=0x1
+  ENTER a0=0xe89a10 a1=0x16     a2=0xa21418  ra=0x83dd80   EXIT pc=0x6d6c40 v0=0x1   <-- EL SELECTOR
+  ```
+  - `ra=0x83dd80` = substate 2 de `FUN_0083dc40` ✓.
+  - **`a2=0xa21418`** = exactamente la tabla descriptora que predijo Gemini (`$gp-0x6c58`) ✓.
+  - Devuelve `v0=1` y **hace tail-call a `0x6d6c40`** (`EXIT pc=0x6d6c40`) ⇒ el build real sigue ahí.
+  - ⇒ **Hipótesis A ("los widgets nunca se crean") REFUTADA**: el constructor del selector corre.
+- ❌ **`0x804c50` nunca entra** (0) ⇒ el camino de inserción no pasa por esa función (o es un fragmento).
+- ❌ **Ningún `[ui-insert]` tiene `global=1`**: 115 inserts, **0** con `a0 == 0xA887B8`. Además
+  `a0+0xBC` da basura (`0x10000020`, `0x1a0019`, …) ⇒ **`a0` no es un manager con centinela en +0xBC**;
+  la etiqueta "mgr=" del log era engañosa.
+- `t3_7c=0x0`, `t3_84=0x0` siguen en 0 al final (esos offsets pueden estar mal, o el store no ocurre).
+- **Nuevo objetivo**: el tail-call **`0x6d6c40`** (el que realmente construye/enlaza) y, de paso, qué
+  dirección de manager usa `FUN_0083d290` al iterar.
+
+### (31) CAUSA DEL "NO SE VE" LOCALIZADA: los widgets **sí** se insertan, pero **la draw `0x83D290` NUNCA se llama**
+
+Sondas nuevas (head de `0xA88874` **después** de cada insert/clear + log directo al entrar a
+`FUN_0083d290` en el generado). Corrida completa (f=2240):
+
+- ✅ **Los inserts aterrizan en `0xA88874`**: `FUN_006d6a80` **hardcodea el centinela** (`0x6d6aa0:
+  lw $a0,-0x778C($v1)` = `*(0xA88874)`; `0x6d6ab8: sw $a1,-0x778C($v1)` → `*(0xA88874) = node`), o sea
+  **todas** las inserciones van a esa lista, sin importar `a0`. Los `AFTER head=` lo confirman:
+  `0xe81d18` (≈ el `0xE81F18` del real), `0xe8c358`, `0xcb5e08`, `0xcb55e8`, `0xe8c0d8`, `0xe8be58`.
+- ❌ **`FUN_0083d290` (la DRAW del selector, descriptor `0x9C8890+0x14`) NUNCA se ejecuta**: **0 entradas**
+  en toda la corrida (log puesto directamente en el archivo generado, no vía `replaceFunction`).
+  ⇒ **No es un problema de renderizado: es que no se dibuja nada.** `rgbNZ=0` queda explicado.
+- ⚠️ **ClearAll muchísimas veces**: `[ui-clear]` **2264** ocurrencias = `[ui-reset]` **2264** (1:1 con el
+  reset periódico de `0x6d51b0`, llamador `ra=0x7569e4`), con `AFTER head=0xa88874` la mayoría de las veces.
+  Inserts 5374 > clears 2264, pero aun así la lista aparece vacía en casi todas las muestras.
+- **Qué corre realmente**: `0x5107F0(task, fn, sub)` escribe `task+0x20 = fn` (callback), `task+0x38 = sub`,
+  `task+0x3C = 0` ⇒ el callback vivo de la tarea es **`0x83D990`** (el bucle de control que lee el pad,
+  llamado desde `FUN_0083d6b0`), **no** la draw `0x83D290`. `0x510810` hace lo mismo con `fn=0` y `sub=0`.
+- **Pregunta siguiente**: ¿cómo invoca el scheduler el slot de **draw** del descriptor (`0x9C8890+0x14`) y
+  por qué no lo hace? ¿Está gateado por un flag/estado de la tarea (¿`t3st=2` es "activo"?), por la lista de
+  capas (`t3_84`) o porque `0x5107F0` sobrescribió el mismo slot que el scheduler usa para dibujar?
+
+### (32) v85 CONFIRMADO: `0x83D290` es el **destructor**, y el dibujo de UI (`0x6db0d0` → `0x6daef0`) **SÍ corre y pasa los gates**
+
+- ✅ **Reinterpretación verificada estáticamente**: `0x6db0d0` (que yo había llamado "ClearAll") **llama a
+  `0x6daef0`** (`dispatchGuestBranch(..., 0x6DAEF0u, ...)` en `FUN_006db0d0_0x6db0d0.cpp:79-83`) ⇒ es el
+  **flush/draw de UI**, no un purge. Y `0x6daef0` lee `flags = *(u8*)(widget+3)` y testea el bit 0
+  (`FUN_006daef0_0x6daef0.cpp:188-195`) ⇒ **Gate 2**.
+- ✅ **`0x83D290` es el DESTRUCTOR** (descriptor `+0x14`), no la draw ⇒ su **0 ejecuciones es correcto**.
+  Mi lectura anterior ("la draw nunca corre") era **errónea**: la draw es `0x6db0d0`+`0x6daef0`, y **corre**.
+- ✅ **El pipeline de UI corre y pasa los gates** (sonda en `0x6daef0`): `[ui-render]` con
+  `flags=0xf visible=1` y **`rlEmpty=0`** (lista de comandos con elementos) para casi todos los widgets,
+  p. ej. `widget=0xcb5e00 rlHead=0xcb5b58`. Van 60 en el límite del log, con 5434 inserts / 2289 draws.
+- ⇒ **El problema NO está en la maquinaria de UI**: los widgets se crean, se encolan, son visibles, tienen
+  comandos, y el renderizador los despacha **cada frame**. Lo que falta está **dentro de los callbacks de
+  render** (`jalr` en `0x6daf6c` con `*(cmd+0x10)`): qué primitivas emiten y con qué texturas/UV.
+- **Siguiente paso**: identificar y trazar esos callbacks (direcciones de `*(cmd+0x10)`) y correlacionarlos
+  con los prims que llegan al GS (ya sabemos que los prims medidos muestrean el borde transparente).
+

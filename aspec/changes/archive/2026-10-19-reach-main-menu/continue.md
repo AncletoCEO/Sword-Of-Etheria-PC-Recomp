@@ -1,5 +1,8 @@
 # Continuar — reach-main-menu
 
+> ⚠️ **SUPERSEDED (2026-10-19).** Change **archivado**. Continuación:
+> **`aspec/changes/reach-playable-game/CONTINUE_PROMPT.md`**.
+
 > **Prompt de arranque vigente: `CONTINUE_PROMPT.md`** (en esta misma carpeta; idéntico a
 > `work/START_NEXT_SESSION.md`, que está fuera de git). Pegarlo al inicio de la sesión nueva y arrancar con
 > **`/cleto-apply reach-main-menu`**. Incluye el estado verificado al 2026-10-17 (noche), las tareas

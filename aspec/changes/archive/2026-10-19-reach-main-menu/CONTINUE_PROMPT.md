@@ -1,5 +1,9 @@
 # Arranque de sesión — Sword of Etheria (recomp PS2) → MENÚ VISIBLE
 
+> ⚠️ **SUPERSEDED (2026-10-19) — este change se archiva.** La continuación vive en
+> **`aspec/changes/reach-playable-game/CONTINUE_PROMPT.md`** (estado verificado al cierre, lo que falta y
+> las reglas de método actualizadas). El texto de abajo se conserva como registro histórico.
+
 > Pegar este archivo al inicio de la sesión nueva y arrancar con:
 >
 > ```
