@@ -116,16 +116,17 @@
 - [ ] **2.1** Seguir la transición post-selector (`FUN_0083d990` → siguiente fase) **pasando por la
       pantalla de idioma (`t3sub=11`) y el primer FMV** y verificar que se dibuja el título/menú
       principal. 50Hz → language; 60Hz → confirmación (`t3sub=50`) → language.
-      **MEDIDO (2026-10-20)**: language **visible y operable** (PNG de VRAM del present 560 con el
-      texto y las 5 opciones; secuencia `10 → 11 → 50 → 0 → 1` [fade] con `SWORD_AUTOPRESS`).
-      **BLOQUEADO tras el fade**: el tick se congela en f=510 y el hilo principal gira en
-      `FUN_006ec8a8 0x6ec8fc` esperando `descriptor+0x34 != 1`. **v95 verificado**:
-      vtable `0xA887B8+0x5C` = `FUN_006ec8a8` (`WaitForAssetSync`), `+0x11C` = bind `FUN_006d5fb8`;
-      `+0x34` es un **contador de transferencias en vuelo** que incrementa `FUN_006fe618`
-      (`0x6feec4..0x6feed8`) y sólo se limpia en `0x6ec92c`. En el spin: `gp5ec=0`, `gp630=0`,
-      `cbgp=0` (sin callback de fin de DMA). **A/B 1 OK**: `SWORD_FORCE_ASSET_SYNC=1` destraba el
-      fade (`t3sub 1→3` en f=520, handler raíz `0x4ffb40`, sin crash). Falta el fix durable de la
-      finalización y el FMV/IPU (4.2). Detalle: `decisions.md` §18.
+      **MEDIDO (2026-10-22)**: language **visible y operable** (PNG de VRAM del
+      present 560 con el texto y las 5 opciones; secuencia `10 → 11 → 50 → 0 → 1`
+      [fade] con `SWORD_AUTOPRESS`). **FADE DESTRABADO NATURALMENTE**: la causa
+      era el triage `0x6e4ed8` que bypasseaba el tag 0x42; ahora nace OFF
+      (`SWORD_BYPASS_6E4ED8=1` para reactivarlo). Con el path real:
+      `[stage-push] tag=0x1042 target=0xe76b94` → `[handler-exec] tag=0x42` →
+      `t3sub 1→3` en f=520, sin force ni spin. **Nuevo bloqueo**: a f=560 un
+      `JALR` a `0x1a1b00` (`codeRegion=no`, cero en savestates reales) desde el
+      dispatcher `FUN_004f21b0` mata el hilo principal; es la transición a
+      Task1/FMV. Falta resolverlo y después el FMV/IPU (4.2). Detalle:
+      `decisions.md` §18.7.
 - [ ] **2.2** Verificar navegación real con pad en el menú principal (sin overrides).
 - [ ] **2.3** Documentar el mapa de escenas (qué función/task por pantalla) en `decisions.md`.
 

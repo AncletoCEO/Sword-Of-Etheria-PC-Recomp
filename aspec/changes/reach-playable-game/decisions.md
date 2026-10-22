@@ -678,3 +678,43 @@ secuencia language→fade→FMV, camino IPU/HLE y A/B.
 - **Consulta v96 escrita**: `work/gemini/msg_gemini_v96.md` (pendiente). Pregunta por la instrucción
   que decrementa `+0x34`, el canal/CHCR de la subida, la instalación del callback `-0x7A30`, el IRQ
   DMAC que falta y el fix durable en el runtime.
+
+### 18.6 Uploader/consumer (2026-10-22): se encola pero el consumer no procesa el ring
+
+- El uploader **sí encola** el descriptor: `[upload] inc s3=0xe76b94 c34=0 c38=0`
+  → `[upload] enqueue s3=0xe76b94 c34=1 c38=1` (8 descriptores al boot).
+- `FUN_006e69b8` empuja `descriptor+0x34` en `gp[0x644]` (índices `0x648/0x64A`)
+  y **sólo llama a `FUN_006e4848` si `read==write`** tras el push; si no,
+  retorna en `0x6e6a48` (`[enqueue-done]` nunca aparece).
+- `FUN_006e4848` **nunca llega al lazo del ring** (`0x6e48ac`, sonda `[consume]`=0):
+  probablemente toma el path `gp[0x62C]!=0` → `0x6e490c`.
+- El worker **sí publica** colas no vacías 14 veces (`[worker-pub] head!=tail`),
+  pero `FUN_006e4068` ve una sola cola no vacía (n=23) y un solo IRQ (n=24,
+  cause 1); después todo vacío. En el spin `*s1=1`, `gp630=0`, `head=tail=0`.
+- Consulta **v97** escrita: `work/gemini/msg_gemini_v97.md` (pendiente). Pregunta
+  el protocolo del ring/consumer, `gp[0x62C]`, quién consume el backlog, el paso
+  que falta para decrementar `+0x34` y el fix durable.
+- **Ring medido (2026-10-22)**: `[consume-entry] gp62c=0x1101 r648=0 w64a=7`
+  cuando hay backlog; `gp62c=0` sólo con `r=w=0`. `[consume]` (lazo del ring)
+  nunca corre y **read nunca avanza**; `e76b94` se encola con `r=0 w=7`. El
+  consumer se salta el ring porque `gp[0x62C]=0x1101` (path DMA `0x6e490c`).
+  El `[worker-pub]` publica 14 colas no vacías, pero el handler ve una sola.
+  v97 debe explicar `gp[0x62C]=0x1101`, quién lo limpia y qué completa el DMA.
+
+### 18.7 Causa raíz del fade: el bypass de `0x6e4ed8` (2026-10-22)
+
+- v97 verificada: `FUN_006e4848` tiene dos lazos (Rama 1 si `gp62c==0`, Rama 2 si
+  `gp62c!=0`); el ring se consume (Rama 2) y `gp62c=0x1101` es transitorio.
+- El bloqueo real era un **triage viejo de 2026-10-06** que instalaba
+  `triage6e4ed8` **sin env-gate** sobre `0x6e4ed8` (submitter del tag 0x42):
+  lo bypasseaba y descartaba la finalización. Sondas: `[consume-path2]
+  entry=0xe76b94 n=1` sí procesa el descriptor, pero `[stage-push]` nunca
+  aparece y el handler sólo ve tags 0x1/0x21.
+- **Fix**: el bypass ahora sólo se instala con `SWORD_BYPASS_6E4ED8=1` (OFF por
+  defecto). Con el path real: `[stage-push] tag=0x1042 target=0xe76b94` →
+  `[handler-exec] tag=0x42` → el fade sale **naturalmente** (`t3sub 1→3` en
+  f=520), sin `SWORD_FORCE_ASSET_SYNC` y sin el spin `[sync]`.
+- **Nuevo bloqueo (mismo f=560)**: `JALR` a `0x1a1b00` (`codeRegion=no`) desde
+  `FUN_004f21b0` (dispatcher de callbacks), y muere el hilo principal. En los
+  savestates reales `0x1a1b00/0x1a1b20` están en cero. Es la transición a
+  Task1/FMV; requiere investigación (v98). El fix del fade es independiente.

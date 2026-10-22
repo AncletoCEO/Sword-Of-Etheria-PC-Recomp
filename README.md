@@ -8,12 +8,12 @@ versión PAL Europa) a binario nativo de PC con
 
 Experimental: el juego arranca, carga sus `.BIN` desde el ISO e inicializa
 GS/VSync. **El selector de video PAL/NTSC se ve y se opera** (teclado/pad), y la
-**pantalla de idioma** se ve y responde. Tras confirmar el idioma el juego queda
-en el **fade** por un cuelgue conocido del pipeline de subida de textura
-(`descriptor+0x34`): todavía no llega al FMV, título, menú ni gameplay. Audio y
-guardado sin verificar. Release de prueba: `dist/v0.0.1/linux-x86_64/` (Linux
-x86_64; el binario no se versiona, se publica como asset). Detalle y
-mediciones: `aspec/changes/reach-playable-game/decisions.md` §18.
+**pantalla de idioma** se ve y responde. Al confirmar el idioma el **fade sale
+naturalmente** (fix del submitter `0x6e4ed8`), pero la transición a **Task 1/FMV**
+se bloquea con un `JALR` a `0x1a1b00`; todavía no llega al FMV, título, menú ni
+gameplay. Audio y guardado sin verificar. Release de prueba:
+`dist/public/v0.0.1/` (tools + launcher; el binario se compila localmente).
+Detalle y mediciones: `aspec/changes/reach-playable-game/decisions.md` §18.
 
 ## Requisitos
 
