@@ -25,32 +25,20 @@ mediciones: `aspec/changes/reach-playable-game/decisions.md` §18.
 
 ## Uso
 
-### Release precompilado (0.0.1, Linux x86_64)
+### Release 0.0.1 (Linux x86_64, tools + launcher)
 
 ```bash
-tar -xzf sword-of-etheria-recomp-0.0.1-linux-x86_64.tar.gz
-cd linux-x86_64
+tar -xzf sword-of-etheria-recomp-0.0.1-tools-linux-x86_64.tar.gz
+cd v0.0.1
 ./run.sh "/ruta/Sword of Etheria, The (Europe) (En,Fr,De,Es,It).iso"
 ```
 
-El launcher verifica el MD5, extrae `SLES_537.68` e `IOP/` del ISO y arranca.
-No incluye ISO/ELF/assets: usá tu propio disco.
+El paquete **no incluye datos del juego**: trae el recompilador, la fuente del
+runtime y el launcher. El launcher verifica el MD5, extrae `SLES_537.68` e
+`IOP/`, recompila/compila **en tu máquina** (la primera vez puede tardar horas;
+después cachea) y ejecuta. El binario y el C++ generado quedan solo en tu disco.
 
-### Launcher de producto (modelo de distribución)
-
-El release público **no** distribuye el binario recompilado (contiene código
-derivado del juego). Distribuye el recompilador + este launcher, y el binario se
-genera en la máquina del usuario a partir de su ISO:
-
-```bash
-python game/launcher.py
-# o:
-python game/launcher.py --iso "Sword of Etheria, The (Europe) (En,Fr,De,Es,It).iso"
-```
-
-El launcher pide/recuerda el ISO, verifica el MD5, extrae el ELF y el IOP a un
-directorio de datos del usuario, recompila/compila **localmente** (cachea el
-build) y ejecuta. En desarrollo, para reutilizar el árbol actual:
+En desarrollo, para reutilizar el árbol actual:
 `python game/launcher.py --work work --no-pin --no-build`.
 
 ### Build desde fuente
