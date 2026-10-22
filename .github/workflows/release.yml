@@ -23,7 +23,7 @@ jobs:
       - name: Checkout and pin PS2Recomp tools (fork)
         run: |
           git clone --recurse-submodules https://github.com/AncletoCEO/Ps2Recomp-of-etheria.git tools-ci
-          git -C tools-ci checkout 7364cc68a25b11cf28bfc6c1d29ad011f318fedd
+          git -C tools-ci checkout 9707a00ac1519eea3ba74249196c77bdcf289257
 
       - name: Build ps2_recomp and ps2_analyzer
         run: |
@@ -47,8 +47,10 @@ jobs:
         run: |
           mkdir -p dist/tools/PS2Recomp/out dist/game
           cp tools-ci/out/ps2xRecomp/ps2_recomp tools-ci/out/ps2xAnalyzer/ps2_analyzer dist/tools/PS2Recomp/out/ 2>/dev/null || cp tools-ci/out/*/ps2_* dist/tools/PS2Recomp/out/
-          cp build_release.py README.md dist/
+          cp build_release.py run.sh README.md dist/
           cp -r game/* dist/game/
+          cp tools-ci/CMakeLists.txt tools-ci/LICENSE dist/tools/PS2Recomp/
+          cp -r tools-ci/ps2xRuntime tools-ci/ps2xIOP tools-ci/ps2xRecomp dist/tools/PS2Recomp/
           tar -czf sword-etheria-tools-linux.tar.gz -C dist .
 
       - name: Upload asset
@@ -66,7 +68,7 @@ jobs:
       - name: Checkout and pin PS2Recomp tools (fork)
         run: |
           git clone --recurse-submodules https://github.com/AncletoCEO/Ps2Recomp-of-etheria.git tools-ci
-          git -C tools-ci checkout 7364cc68a25b11cf28bfc6c1d29ad011f318fedd
+          git -C tools-ci checkout 9707a00ac1519eea3ba74249196c77bdcf289257
         shell: pwsh
 
       - name: Build ps2_recomp and ps2_analyzer
@@ -86,8 +88,10 @@ jobs:
         run: |
           New-Item -ItemType Directory -Force -Path dist/tools/PS2Recomp/out, dist/game
           Get-ChildItem tools-ci/out -Recurse -Include ps2_recomp.exe,ps2_analyzer.exe | Copy-Item -Destination dist/tools/PS2Recomp/out/
-          Copy-Item build_release.py, README.md dist/
+          Copy-Item build_release.py, run.sh, README.md dist/
           Copy-Item -Recurse game/* dist/game/
+          Copy-Item tools-ci/CMakeLists.txt, tools-ci/LICENSE dist/tools/PS2Recomp/
+          Copy-Item -Recurse tools-ci/ps2xRuntime, tools-ci/ps2xIOP, tools-ci/ps2xRecomp dist/tools/PS2Recomp/
           Compress-Archive -Path dist/* -DestinationPath sword-etheria-tools-windows.zip
         shell: pwsh
 
