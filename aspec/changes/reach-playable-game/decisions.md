@@ -547,3 +547,134 @@ local: clear/alpha test del sprite de clear y posiciones del texto por frame (du
 `t3sub=10`), o consulta v94 con estas correcciones.
 
 **Hito 1.6 sigue abierto.** No se aplicó el fix de v93 (no-op).
+
+## 16. Ronda v94 (2026-10-20): página/CRT/display copy; handoff a Gemini
+
+- **Selector**: page 0 forzada + lectura 640 sin crop = **limpio** (caja/texto/`NTSC`/`PAL`/cursor)
+  con **bleed de la página vecina** a la derecha (~x=553). `dispfb1=0x1400` (FBP 0/FBW 10),
+  `ctx=0x80/8` (page 0x80 con texto fantasma), display1 640×448, display2 512×511. Real
+  `dispfb=0x001fe9ff02048290` (FBP=0x90/FBW=1/PSM=9). `[dc-probe]`: full-screen sprite `tme=0`;
+  `preferred=0`, `prefDestFbp=0`.
+- **A/B**: context 0x80 → fantasma; crop 0/44 + scale 512→640 → fantasma/duplicado; `crt2`
+  (display2 512×511) priority → bandas; display1 0/10 + crt2 → doble copia; fallback page 0x80 →
+  `nz=0`; page 0x90 **no probada**.
+- **Language**: con `cross` sostenido, `t3sub=10→1→0`; `t3sub=0` frame **negro**; `0x80 nz=0`.
+  El `cross` confirma el idioma por defecto y salta al FMV; falta correr sin pad / un solo toque.
+- **Handoff**: `work/gemini/msg_gemini_v94.md` (**PENDIENTE**). Preguntas: display env real, path
+  `sceGs*`/DBuff/display copy, display1 vs display2, crop/bleed, page 0x90, language, A/B.
+
+## 17. v94 verificado y fix 512×511 (2026-10-20)
+
+- **Respuesta v94 verificada contra `eeMemory.bin`/`pcsx2 log`**: el `DISPLAY` real es **512×511**
+  (`0x00A8D0C8`; DW=2559/MAGH=4, DH=510); los `DISPFB` son **page 0** (`0x80000001000`) y **page
+  0x80** (`0x80000001080`), **FBW=8**, PSM=0. No existe FBP `0x90`/PSM 9: era el registro `DISPLAY`
+  leído con el layout de `DISPFB`.
+- **Causa del bleed**: el present leía **640×448** (default del stub) sobre un buffer **FBW=8**
+  (512); 128 px por fila desbordaban a la página vecina. **Fix aplicado**: al forzar page 0, leer
+  **512×511** y escalar a la ventana 4:3; `frame_300.bmp` 512×511 **limpio**, sin bleed.
+- **La pantalla de idioma SÍ existe** (corrección del usuario, confirmada en el juego real):
+  50Hz → language (`t3sub=11`); 60Hz → confirmación (`t3sub=50`) → language; luego `t3sub=1` fade
+  → `t3sub=0` FMV (`movie/op.pss`). El log de PCSX2 no registra los menús; el `t3sub=11` del log
+  del pad coincide con la language.
+- **No hay display copy**: el sprite `tme=0` es el clear de `sceGsSetDefClear`; el scan-out es
+  directo del CRTC; page `0x90` no existe.
+- **Hito 1.6 / Hito 1 cerrados** (selector visible + pad). Siguiente: **FMV 4.2 + audio 4.1**.
+  Deuda de root-cause: stub `sceGsSetDefDispEnv` 640×448 (compensado por la lectura 512×511 del
+  present).
+
+## 18. Hito 2.1 (2026-10-20): language visible; el juego se clava tras el fade esperando `descriptor+0x34`
+
+**Language VERIFICADO visualmente.** Con pulsaciones deterministas por estado
+(`SWORD_AUTOPRESS=1`; ver §18.4) la secuencia medida es:
+
+```
+t3sub=10 f=200 (selector) -> 11 f=320 (language) -> 50 f=360 -> 0 f=370 -> 1 f=470 (fade)
+```
+
+Volcado de VRAM en present 560 decodificado a PNG: **“Choose the language for audio and text that
+appears in the game.” + `English`/`Français`/`Deutsch`/`Italiano`/`Español` + cursor**. ✔
+
+**El tick se CONGELA tras el fade.** `[task]` se queda en **f=510**; `[gs:present]` sigue (hasta
+#3300 en una corrida de 600 s) ⇒ el VBlank/present vive, el juego no avanza. Hilos en el cuelgue:
+id=1 `pc=0x6EC908` (corriendo), id=2 `0x4D3FE8 wr=2 wid=3`, id=3 `0x628948 wr=1 wid=0`.
+
+**El lazo** es `FUN_006ec8a8` (`0x6ec8fc..0x6ec91c`): `while (*(a1 + gp[0x658])) > 0` llama dos veces
+a `FUN_006e4cc0`; `gp[0x658]=0x34`. Sonda `SWORD_SYNC_TRACE=1` (temporal en el generado):
+
+```
+[sync] savedRa=0x6d9f20 s0=0xe76b60 s1=0xe76b94 *s1=0x1 gp658=0x34 cb=0x0
+ words=e76b60 e76d50 e78dd0 80 80 4 40 0 45000004 e76c10 80 80 40 1 0 dd40a8e0
+```
+
+`s0` es el descriptor real `0xE76D60` (punteros corridos −0x200). Comparado con
+`/tmp/realstate/eeMemory.bin`: **única diferencia de contenido, `+0x34` = `1` nuestro vs `0` real**
+(aunque el savestate es del selector, no del fade: la comparación es orientativa).
+
+**Caller/vtable (v95 VERIFICADO)**: la base es **`0xA887B8`**, no `0xA98874`:
+`lui $s0,0xA9` + `addiu $s0,-0x7848` = `0xA90000-0x7848 = 0xA887B8`. Volcada la tabla del savestate
+real (`videoformat_menu.p2s`), coincide: `+0x58=0x6ea548`, **`+0x5C=0x6ec8a8`**, `+0x78=0x6ec500`,
+`+0x9C=0x6e8848`, `+0x10C=0x5ea650`, `+0x118=0x6d5f90`, **`+0x11C=0x6d5fb8`**. `+0x5C` es
+`WaitForAssetSync` y `+0x11C` el bind/TEX0 que corre inmediatamente después.
+
+**Semántica de `+0x34` (v95 VERIFICADO)**: es un **contador de 32 bits de transferencias en vuelo**
+(0 = asset listo; >0 = DMA pendiente). Lo incrementa `FUN_006fe618` en `0x6feec4..0x6feed8`
+(`di`/`lw`/`addiu 1`/`ei`/`sw`), con `s3 = descriptor+0x34` (`0x6fe630: addu s3,fp,gp[0x658]`). El
+lazo lo limpia explícitamente en `FUN_006ec8a8:0x6ec92c` (`sw $zero,0($s1)`) al salir. Las escrituras
+`0x6ea7a0/0x6ea5b8` de `FUN_006ea548` van a **`descriptor+0x68`** (`s1 = descriptor+0x34` en
+`0x6ea580`), no a `+0x34`: la lectura anterior era incorrecta.
+
+**Por qué no baja (MEDIDO)**: el lazo corre con `gp5ec=0`, `gp630=0` y **`cbgp=0`** (no hay callback
+de fin de DMA armado en `-0x7A30($gp)`); `*s1=1` permanece. `FUN_006e4cc0` es el flusheador de
+DMA/cola (`0x1000D000/0x1000E020`, callback `-0x7A30($gp)`), y sólo invoca el callback si
+`gp[0x630]!=0`. El runtime sí emula DMA de scratchpad (`tryProcessScratchpadDma`), pero este path
+nunca arma el callback/contador.
+
+**A/B 1 (v95)**: con `SWORD_FORCE_ASSET_SYNC=1` (OFF por defecto; fuerza `*s1=0` tras 1000
+iteraciones) el juego **sale del cuelgue**: `t3sub=1 → 3` en f=520, nuevo handler raíz `0x4ffb40`,
+el tick sigue (f=560) y no crashea en el bind `+0x11C`. ⇒ el contador es el **único** bloqueo en el
+fade; falta el fix durable de la finalización y el FMV/IPU.
+
+**No hay FMV todavía**: `[sceCdSearchFile]` sólo ve los BIN de boot; ningún `.PSS`. La sonda nueva
+`SWORD_IPU_TRACE=1` (en `writeIORegister` para `0x10002000..0x10002030`) da **0 escrituras**: la IPU
+nunca se programa. La libipu del juego es estática (`PsIIlibipu 3000`); el runtime sólo guarda los
+registros IPU (`ps2_memory.cpp`), no decodifica. ⇒ el FMV (4.2) exige IPU o HLE de libipu, y el
+bloqueo inmediato es el lazo de `+0x34`.
+
+**Consulta v95 escrita**: `work/gemini/msg_gemini_v95.md` (pendiente de respuesta). Preguntas: vtable
+`0xA98874+0x5C`, semántica de `+0x34`, rama/evento que ejecuta `0x6ea5b8`, asset `0xE76D60`,
+secuencia language→fade→FMV, camino IPU/HLE y A/B.
+
+### 18.4 Sondas nuevas (env-gated, OFF por defecto)
+
+- `SWORD_PAD_TIMES=<seg,...>`: pulsos de 250 ms en instantes dados (se usa con `SWORD_PAD_PRESS`).
+- `SWORD_AUTOPRESS=1`: pulsa Cross de forma determinista por estado (`t3sub=10`, y confirmación de
+  language 150 frames después), sin depender del reloj.
+- `SWORD_IPU_TRACE=1`: escrituras a `0x10002000..0x10002030` (64 primeras).
+- `SWORD_SYNC_TRACE=1`: volcado único del lazo `FUN_006ec8a8` (temporal en `work/generated`).
+- `SWORD_TRACE_DMA=1` / `SWORD_TRACE_UI=1`: reactivan las sondas legacy `[hit-6e4848]`,
+  `[triage-4848]`, `[ui-insert]`, `[ui-clear]`, `[ui-reset]`, … Ahora **OFF por defecto**: sin esto
+  el log crecía ~600 MB en 300 s y frenaba la corrida.
+
+### 18.5 Mediciones DMA/IRQ y A/B 1 (2026-10-21)
+
+- **Cola de texturas**: el uploader `FUN_006fe618` incrementa `descriptor+0x34` y `+0x38`; al quedar
+  `+0x38==1` llama `FUN_006e69b8(a0=descriptor+0x34)`, que encola el puntero en el ring
+  `gp[0x644]` (índices `gp[0x648]`/`gp[0x64A]`) y llama `FUN_006e4848` (constructor de paquete).
+  `FUN_006e4848` consume el ring, **pone a 0 `entry+4` (= descriptor+0x38)** y arma paquetes, pero
+  **no escribe `entry+0` (+0x34)**.
+- **Worker** `FUN_006e4cc0`: con `gp[0x5EC]=0` no entra al path de hardware; el callback
+  `-0x7A30($gp)` sólo se invoca si `gp[0x630]!=0`. Medido en el spin: `gp5ec=0`, `gp630=0`,
+  `cbgp=0` (el slot del callback está en 0; el setter `0x6e6930` no se llama en nuestro run).
+- **IRQ/DMA**: el juego registra DMAC `cause=1` y `cause=2` → handler `0x6e4068`, pero
+  `drainCompletedDmacHandlers` sólo ve causas 2/1/8 con `head=tail=0 EMPTY` y **sólo despacha
+  `dmac cause=1` una vez**; `cause=2` (GIF) y `cause=8` (SPR) nunca se despachan. No hay llamadas
+  HLE `[sceDmaSend]` (el juego escribe CHCR por el path recompilado).
+- **Triage viejo `0x6e4d98`**: sigue instalado con `replaceFunction`, pero **no se ejecuta** en estas
+  corridas (0 logs `[triage]`); el worker se invoca por su entry `0x6e4cc0`, no por el slot interior.
+- **A/B 1 (`SWORD_FORCE_ASSET_SYNC=1`)**: destraba el fade (`t3sub 1→3`, f=520, handler raíz
+  `0x4ffb40`), pero a f=560 aparece un `JALR` a `0x1a1b00` (`codeRegion=no`) y muere el hilo
+  principal. En los savestates reales (`videoformat_menu`, `draw_vif1kick`) `0x1a1b00/0x1a1b20`
+  están **en cero** ⇒ artefacto del forzado, no overlay real. El force no es el fix.
+- **Consulta v96 escrita**: `work/gemini/msg_gemini_v96.md` (pendiente). Pregunta por la instrucción
+  que decrementa `+0x34`, el canal/CHCR de la subida, la instalación del callback `-0x7A30`, el IRQ
+  DMAC que falta y el fix durable en el runtime.

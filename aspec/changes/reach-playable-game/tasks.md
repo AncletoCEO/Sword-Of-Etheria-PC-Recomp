@@ -44,7 +44,7 @@
       chrome se muestrea en su fila transparente; (c) **falso** — hay prims (TRIFAN tme=1, tbp0=10240)
       emitidas por VU1 XGKICK (`[vu1:mscal] eePc=0x6e4468`), sólo que diferidas. El microprograma VU1 del
       selector **sí** se sube (MPG #2 = primeros bytes de `vu1MicroMem.bin`).
-- [ ] **1.4 Corregir sin hacks** (runtime si es bug nuestro; estado del juego si es data/gate) y verificar
+- [x] **1.4 Corregir sin hacks** (runtime si es bug nuestro; estado del juego si es data/gate) y verificar
       **`rgbNZ > 0`** con el selector visible, sin `SWORD_CONFIRM_MENU` ni `SWORD_INJECT_*`.
       **CAUSA RAÍZ ENCONTRADA, PERO VISUALMENTE NO CERRADO (2026-10-20)**: el bug del recompilador era
       real (`COP1 sqrt.s` leía `Fs` en vez de `Ft`; `FUN_006cc5e0 0x6cc628 sqrt.s f1,f1` →
@@ -58,11 +58,12 @@
       el escenario 3D que ahora sí dibujan los otros 93 `sqrt` corregidos y tapa/desplaza la UI, o si el
       draw de la UI sigue mal (layout/UV/depth). El A/B con solo el fix de cámara daba `rgbNZ=22560`,
       compatible con el selector; el build con todos los `sqrt` da 261k magenta.
-- [ ] **1.5 Cerrar el hito**: selector visible + navegable con pad (flechas alternan PAL/NTSC, Cross avanza).
-      **PAD VERIFICADO, VISUAL NO**: `[pad-host] buttons=0x40` (Cross) y `t3sub` 10 → 11 → 0/1/3/50; el
-      mapeo de flechas está en `padHook51c7c0` (Up=0x8000, Down=0x2000, Left=0x2, Right=0x8). Pero el
-      selector **no se ve** en la VRAM (ver 1.4), así que el hito no se cierra. **Requisito previo: 1.6.**
-- [ ] **1.6 Verificación VISUAL de las opciones (bloqueante del hito 1)**: volcar la VRAM del frame
+- [x] **1.5 Cerrar el hito**: selector visible + navegable con pad (flechas alternan PAL/NTSC, Cross avanza).
+      **PAD VERIFICADO + VISUAL CERRADO (2026-10-20)**: `[pad-host] buttons=0x40` (Cross) y `t3sub`
+      10 → 11 → 0/1/3/50; mapeo en `padHook51c7c0` (Up=0x8000, Down=0x2000, Left=0x2, Right=0x8).
+      El selector ya se ve limpio (`frame_300.bmp` 512×511: caja/texto/`NTSC`/`PAL`/cursor) y el pad
+      lo opera; el Hito 1 queda cerrado.
+- [x] **1.6 Verificación VISUAL de las opciones**: volcar la VRAM del frame
       presentado y decodificarla con `game/decode_gs_frame.py` (PSMCT32, fbp=0, fbw=10); confirmar en el
       PNG que se ven **la caja, `Select video format.`, las opciones `NTSC(60Hz)`/`PAL(50Hz)` y el
       cursor**, y compararlo con la captura real de PCSX2 (`/tmp/realstate/Screenshot.png`).
@@ -94,6 +95,16 @@
       **dos frames**, no dos pases. Lead: acumulación entre frames (clear/alpha test) y/o scroll;
       el A/B `SWORD_NO_ALPHA_TEST=1` fue inconcluso (`t3sub=0`). Siguiente: clear/alpha test y
       posiciones del texto por frame. UNPACK V2/V3 queda después.
+      **v94 VERIFICADO (2026-10-20)**: el `DISPLAY` real es **512×511** (`eeMemory 0x00A8D0C8`:
+      DW=2559/MAGH=4, DH=510); los `DISPFB` son **page 0** y **page 0x80**, **FBW=8**, PSM=0. La
+      lectura correcta es **512×511** (no 640×448): `frame_300.bmp` 512×511 **limpio**, sin bleed
+      derecho, con caja/texto/opciones/cursor. Secuencia: selector → language (`t3sub=11`) →
+      fade (`t3sub=1`) → FMV (`t3sub=0`, `movie/op.pss`). **Corrección del usuario (juego real)**:
+      la pantalla de idioma **SÍ existe**; 50Hz → language (`t3sub=11`); 60Hz → confirmación
+      (`t3sub=50`) → language; luego fade/FMV. El log de PCSX2 no registra los menús; el `t3sub=11`
+      del log del pad es la language. La página 0x90 no existe. **Siguiente: language (t3sub=11)
+      + FMV 4.2 + audio 4.1**; el stub `sceGsSetDefDispEnv` (640×448) queda como deuda de
+      root-cause, compensado por la lectura 512×511 del present.
 
 ## Hito 2 — Título y menú principal
 
@@ -102,8 +113,19 @@
 > FMV se verifica con **4.1** en la misma pasada. El orden de ejecución es 1.6 → 4.2 (+4.1) → 2.1/2.2 →
 > 3.x → 4.3 → 5.x; la numeración de hitos se mantiene sólo para seguimiento.
 
-- [ ] **2.1** Seguir la transición post-selector (`FUN_0083d990` → siguiente fase) **pasando por el
-      primer FMV** y verificar que se dibuja el título/menú principal.
+- [ ] **2.1** Seguir la transición post-selector (`FUN_0083d990` → siguiente fase) **pasando por la
+      pantalla de idioma (`t3sub=11`) y el primer FMV** y verificar que se dibuja el título/menú
+      principal. 50Hz → language; 60Hz → confirmación (`t3sub=50`) → language.
+      **MEDIDO (2026-10-20)**: language **visible y operable** (PNG de VRAM del present 560 con el
+      texto y las 5 opciones; secuencia `10 → 11 → 50 → 0 → 1` [fade] con `SWORD_AUTOPRESS`).
+      **BLOQUEADO tras el fade**: el tick se congela en f=510 y el hilo principal gira en
+      `FUN_006ec8a8 0x6ec8fc` esperando `descriptor+0x34 != 1`. **v95 verificado**:
+      vtable `0xA887B8+0x5C` = `FUN_006ec8a8` (`WaitForAssetSync`), `+0x11C` = bind `FUN_006d5fb8`;
+      `+0x34` es un **contador de transferencias en vuelo** que incrementa `FUN_006fe618`
+      (`0x6feec4..0x6feed8`) y sólo se limpia en `0x6ec92c`. En el spin: `gp5ec=0`, `gp630=0`,
+      `cbgp=0` (sin callback de fin de DMA). **A/B 1 OK**: `SWORD_FORCE_ASSET_SYNC=1` destraba el
+      fade (`t3sub 1→3` en f=520, handler raíz `0x4ffb40`, sin crash). Falta el fix durable de la
+      finalización y el FMV/IPU (4.2). Detalle: `decisions.md` §18.
 - [ ] **2.2** Verificar navegación real con pad en el menú principal (sin overrides).
 - [ ] **2.3** Documentar el mapa de escenas (qué función/task por pantalla) en `decisions.md`.
 
@@ -124,6 +146,10 @@
       verificado junto con 4.2.
 - [ ] **4.2** Reproductor de vídeo/cinemáticas (si el juego las usa) verificado. **Se adelanta: es
       prerequisito de 2.1/2.2** (el menú principal llega después del primer FMV).
+      **MEDIDO (2026-10-20)**: el juego no importa `sceMpeg*`; linkea **libipu estáticamente**
+      (`PsIIlibipu 3000`) y todavía no escribe ningún registro IPU (`SWORD_IPU_TRACE`=0). El runtime
+      sólo almacena `0x10002000..0x10002030` (`ps2_memory.cpp`), no decodifica. Antes del FMV hay que
+      resolver el cuelgue del fade (2.1, `descriptor+0x34`). Consulta v95 pendiente.
 - [ ] **4.3** Memory card / guardado (stubs de `libmc`): crear, leer y escribir.
 
 ## Hito 5 — Producto (launcher + release)
