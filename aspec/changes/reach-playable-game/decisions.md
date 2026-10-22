@@ -761,3 +761,23 @@ secuencia language→fade→FMV, camino IPU/HLE y A/B.
 - Nota de build: agregar el overlay al CMake/`build_release.py` requiere
   **generar** el C++ desde el ISO del usuario (no se puede distribuir el
   código derivado de `menu.bin`). El asset 0.0.1 actual es anterior al overlay.
+
+### 20. Diálogo de memory card: input pendiente (2026-10-22)
+
+- Frames 900/950/1000/1100 (`work/build-game/frame_*.bmp`) muestran el diálogo
+  "No memory card (8MB)... Do you wish to begin anyway? Yes/No" con cursor en
+  No. Task3 `t3sub=2`, Task1 `0x4ffb00`, `t3st=2`; el hilo principal corre.
+- `SWORD_AUTOPRESS`: LEFT (0x0080) en f=933 y CROSS (0x4000) en f=962. El hook
+  EE `0x51c7c0` los ve (`[pad-host] ra=0x534c38 buttons=0x2/0x40`), pero el
+  cursor no se mueve.
+- El overlay **no referencia** `0x51c7c0/0x51e700/0x4ea200/0x4ea2b8`; el trace
+  de overlay muestra `0x6b67b4→0x1002a8→0x1069f8` y `0x6b56e4→0x100580`
+  (menú/save `FUN_006b5570`). `0x1069f8` hace un request (a0=0x1B6000,
+  a2=0x100) a `0x4C3A90` y luego llama `0x784680` (escribe `0xA8FE40`,
+  chequea `0x963C48`).
+- **Sin logs `[MC]`** del HLE EE `sceMc*`: la ruta de memory card que ve el
+  juego no pasa por el HLE; `PADMAN.IRX`/`MC2_D.IRX` están cargados en el IOP.
+  El RPC que se repite (`trackedSid=0x573`, `rpc_id=5`, `server=0x1F10000`) es
+  **TYOSD/display**, no pad.
+- Consulta **v99** escrita: `work/gemini/msg_gemini_v99.md` (dueño del diálogo
+  e input, ruta libmc/padman, cómo inyectar LEFT/CROSS o saltar el prompt).
