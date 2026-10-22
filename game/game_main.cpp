@@ -330,6 +330,11 @@ int main(int argc, char *argv[])
             return 1;
         }
 
+        // Overlay menu.bin recompilado aparte (OL.BIN): registrar sus 558
+        // entrypoints dinamicos antes de correr.
+        extern void sword_register_overlay_functions(PS2Runtime &runtime);
+        sword_register_overlay_functions(runtime);
+
         runtime.run();
 
 #ifdef _DEBUG

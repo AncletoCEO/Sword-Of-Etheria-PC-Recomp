@@ -46,6 +46,19 @@ endif()
 
 file(GLOB GAME_SOURCES "${GENERATED_DIR}/*.cpp")
 
+# Overlay menu.bin (OL.BIN) recompilado aparte: sus 558 funciones viven fuera
+# del segmento principal (0x100080..0x1a1b00) y se registran dinamicamente.
+set(OVERLAY_DIR "${REPO_ROOT}/work/generated-overlay")
+file(GLOB OVERLAY_SOURCES "${OVERLAY_DIR}/*.cpp")
+if(OVERLAY_SOURCES)
+    add_library(menu_overlay STATIC ${OVERLAY_SOURCES})
+    target_include_directories(menu_overlay PRIVATE "${OVERLAY_DIR}/include" "${GENERATED_DIR}")
+    target_link_libraries(menu_overlay PRIVATE ps2_runtime)
+    if(CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|AMD64|x86" AND CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+        target_compile_options(menu_overlay PRIVATE -msse4.1)
+    endif()
+endif()
+
 add_executable(sword_etheria
     game_main.cpp
     ${GAME_SOURCES}
@@ -54,6 +67,9 @@ add_executable(sword_etheria
 target_include_directories(sword_etheria PRIVATE "${GENERATED_DIR}")
 
 target_link_libraries(sword_etheria PRIVATE ps2_runtime)
+if(TARGET menu_overlay)
+    target_link_libraries(sword_etheria PRIVATE menu_overlay)
+endif()
 
 # Unity build: en MSVC 17k TUs serían eternos uno por uno.
 # En Linux/GCC los unity files con batch 48 revientan la RAM (cc1plus killed).

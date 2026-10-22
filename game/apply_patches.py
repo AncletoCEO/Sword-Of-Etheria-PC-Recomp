@@ -30,7 +30,7 @@ REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 PATCH_DIR = os.path.join(REPO_ROOT, "game", "patches", "upstream")
 
 # Commit de PS2Recomp contra el que se generaron los parches (y pin del build).
-PS2RECOMP_PIN = "fd1f5b5bda6221532c4dcc256e7482b938524f2d"
+PS2RECOMP_PIN = "fb7abbce5442962cdea641a86a07387f5cb08488"
 
 
 def run(cmd: list[str], cwd: str) -> subprocess.CompletedProcess:

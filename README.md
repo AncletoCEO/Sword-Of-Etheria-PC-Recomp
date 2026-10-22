@@ -9,8 +9,10 @@ versión PAL Europa) a binario nativo de PC con
 Experimental: el juego arranca, carga sus `.BIN` desde el ISO e inicializa
 GS/VSync. **El selector de video PAL/NTSC se ve y se opera** (teclado/pad), y la
 **pantalla de idioma** se ve y responde. Al confirmar el idioma el **fade sale
-naturalmente** (fix del submitter `0x6e4ed8`), pero la transición a **Task 1/FMV**
-se bloquea con un `JALR` a `0x1a1b00`; todavía no llega al FMV, título, menú ni
+naturalmente** (fix `0x6e4ed8`) y el **overlay `menu.bin`** (recompilado aparte
+desde `OL.BIN`) ya se ejecuta: la transición entra en Task 1 y muestra el
+**diálogo de memory card** ("No memory card... begin anyway? Yes/No"). Falta
+resolver el input de ese diálogo para llegar al FMV/título; todavía no hay
 gameplay. Audio y guardado sin verificar. Release de prueba:
 `dist/public/v0.0.1/` (tools + launcher; el binario se compila localmente).
 Detalle y mediciones: `aspec/changes/reach-playable-game/decisions.md` §18.

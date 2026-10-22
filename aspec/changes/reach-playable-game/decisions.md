@@ -735,3 +735,29 @@ secuencia language→fade→FMV, camino IPU/HLE y A/B.
 - Consulta **v98** escrita: `work/gemini/msg_gemini_v98.md` (pendiente).
   Pregunta identidad/rol de `FUN_004f21b0` y de la lista, quién llena
   `0x1a1b20`, naturaleza de `0x1a1b00` y cómo manejar código dinámico.
+
+### 19. Overlay `menu.bin` desde `OL.BIN` (2026-10-22)
+
+- El segmento 1 del ELF (`0x100000`, `0x54000`) **no** es el `menu.bin` real:
+  en `0x1096c0` hay NOPs. El overlay real está en `OL.BIN` entry `0x41f000`
+  (`MWo3`, id 24/`menu.bin`) hasta `0x4c1000` (0xa2000); texto 0x5a140, datos
+  0x47a00, bss 0x17700; constructor en `0x1a1b00`, `.ctors` en `0x1a1b20`.
+- Se armó un **ELF32 sintético** con el payload de OL.BIN en `0x100000` y
+  símbolos en `0x100080`, `0x1096c0`, `0x1a1b00` + 71 destinos alineados
+  main→overlay (extraídos de `dispatchGuestBranch` en `work/generated`).
+  `ps2_recomp` generó **613 funciones** de overlay.
+- Runtime: mapa dinámico `g_dynamicFunctions` en `ps2_runtime.cpp` y
+  `registerFunction` con fallback fuera de la tabla densa (sin tocar
+  `ps2_runtime.h`, para no invalidar el cache). `game_main` registra
+  ~146k entrypoints del overlay antes de correr.
+- Resultado: sin `missing-target`; Task3 `3→0→1→3→4→1→2`, Task1 `0x4ffb00`;
+  frames 900/950/1000/1100 muestran el **diálogo de memory card** ("No memory
+  card (8MB)... Do you wish to begin anyway? Yes/No", cursor en No).
+- `SWORD_AUTOPRESS` extendido: en `t3sub=2` pulsa LEFT (0x0080) y luego CROSS
+  (0x4000). El hook de pad (`0x51c7c0`) registra LEFT/CROSS, pero el cursor
+  sigue en No: el input del diálogo usa otra ruta (la función de overlay
+  `0x1069f8` llama a `0x784680`/`0x4c3a90`, no al pad hook). Próximo paso:
+  identificar/enganchar esa ruta o manejar el RPC de memory card.
+- Nota de build: agregar el overlay al CMake/`build_release.py` requiere
+  **generar** el C++ desde el ISO del usuario (no se puede distribuir el
+  código derivado de `menu.bin`). El asset 0.0.1 actual es anterior al overlay.
