@@ -113,9 +113,9 @@ def main() -> None:
         extractor = shutil.which("bsdtar") or shutil.which("7z")
         if not extractor:
             sys.exit("error: se necesita bsdtar o 7z para extraer el ELF del ISO")
-        run([extractor, "x", args.iso, "-o" + elf_dir, ELF_NAME, "IOP"]
+        run([extractor, "x", args.iso, "-o" + elf_dir, ELF_NAME, "IOP", "OL.BIN"]
             if os.path.basename(extractor) == "7z"
-            else [extractor, "-x", "-C", elf_dir, "-f", args.iso, ELF_NAME, "IOP"])
+            else [extractor, "-x", "-C", elf_dir, "-f", args.iso, ELF_NAME, "IOP", "OL.BIN"])
 
     config_path = os.path.join(args.work, "config-release.toml")
     with open(config_path, "w") as f:
@@ -145,11 +145,21 @@ def main() -> None:
     # Regla de oro: splitter SIEMPRE después de ps2_recomp, antes de compilar.
     run([sys.executable, os.path.join(REPO_ROOT, "game", "split_monsters.py"), gen_dir])
 
+    # Overlay menu.bin: se regenera desde OL.BIN en la maquina del usuario.
+    overlay_dir = os.path.join(args.work, "generated-overlay")
+    run([sys.executable, os.path.join(REPO_ROOT, "game", "build_overlay.py"),
+         "--olbin", os.path.join(elf_dir, "OL.BIN"),
+         "--generated", gen_dir,
+         "--out", overlay_dir,
+         "--recomp", recomp,
+         "--work", os.path.join(args.work, "overlay")])
+
     run(["cmake", "-S", os.path.join(REPO_ROOT, "game"), "-B", build_dir,
          "-G", "Unix Makefiles", "-DCMAKE_BUILD_TYPE=Release",
          f"-DREPO_ROOT={REPO_ROOT}",
          f"-DPS2RECOMP_DIR={args.tools}",
          f"-DGENERATED_DIR={gen_dir}",
+         f"-DOVERLAY_DIR={overlay_dir}",
          f"-DPS2X_DEFAULT_BOOT_ELF={elf_path}"])
     run(["cmake", "--build", build_dir, "-j", args.jobs])
     print(f"listo: {os.path.join(build_dir, 'sword_etheria')}")

@@ -46,9 +46,9 @@ endif()
 
 file(GLOB GAME_SOURCES "${GENERATED_DIR}/*.cpp")
 
-# Overlay menu.bin (OL.BIN) recompilado aparte: sus 558 funciones viven fuera
+# Overlay menu.bin (OL.BIN) recompilado aparte: sus ~613 funciones viven fuera
 # del segmento principal (0x100080..0x1a1b00) y se registran dinamicamente.
-set(OVERLAY_DIR "${REPO_ROOT}/work/generated-overlay")
+set(OVERLAY_DIR "${REPO_ROOT}/work/generated-overlay" CACHE PATH "C++ generado del overlay menu.bin")
 file(GLOB OVERLAY_SOURCES "${OVERLAY_DIR}/*.cpp")
 if(OVERLAY_SOURCES)
     add_library(menu_overlay STATIC ${OVERLAY_SOURCES})
