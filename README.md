@@ -4,16 +4,16 @@ Recompilación estática del ejecutable PS2 `SLES_537.68` (Sword of Etheria,
 versión PAL Europa) a binario nativo de PC con
 [PS2Recomp](https://github.com/ran-j/PS2Recomp).
 
-## Estado
+## Estado (0.0.1 · 2026-10-21)
 
-Experimental: el juego arranca, carga sus `.BIN` desde el disco, inicializa
-GS/VSync y corre su bucle (VBlank a ~58/s; el *task update* del juego a ~9/s),
-pero **la pantalla queda negra**. Medido 2026-10-17: la geometría **sí** llega
-al GS (`[vif1-chain]`, `[gs:kick] drawing=1`) y **hay contenido en VRAM**
-(`vramNonZero` hasta 475456) — lo que falta es que se **presente la página
-correcta** (se presenta la del clear/fade). Todavía no hay menú jugable.
-Detalle y camino muertos: `aspec/changes/reach-main-menu/decisions.md` §2026-10-17.
-Los glitches gráficos/sonoros son limitación conocida de PS2Recomp.
+Experimental: el juego arranca, carga sus `.BIN` desde el ISO e inicializa
+GS/VSync. **El selector de video PAL/NTSC se ve y se opera** (teclado/pad), y la
+**pantalla de idioma** se ve y responde. Tras confirmar el idioma el juego queda
+en el **fade** por un cuelgue conocido del pipeline de subida de textura
+(`descriptor+0x34`): todavía no llega al FMV, título, menú ni gameplay. Audio y
+guardado sin verificar. Release de prueba: `dist/v0.0.1/linux-x86_64/` (Linux
+x86_64; el binario no se versiona, se publica como asset). Detalle y
+mediciones: `aspec/changes/reach-playable-game/decisions.md` §18.
 
 ## Requisitos
 
@@ -24,6 +24,36 @@ Los glitches gráficos/sonoros son limitación conocida de PS2Recomp.
 - Windows: Git, CMake 3.20+, MSVC C++20, Python 3, 7-Zip
 
 ## Uso
+
+### Release precompilado (0.0.1, Linux x86_64)
+
+```bash
+tar -xzf sword-of-etheria-recomp-0.0.1-linux-x86_64.tar.gz
+cd linux-x86_64
+./run.sh "/ruta/Sword of Etheria, The (Europe) (En,Fr,De,Es,It).iso"
+```
+
+El launcher verifica el MD5, extrae `SLES_537.68` e `IOP/` del ISO y arranca.
+No incluye ISO/ELF/assets: usá tu propio disco.
+
+### Launcher de producto (modelo de distribución)
+
+El release público **no** distribuye el binario recompilado (contiene código
+derivado del juego). Distribuye el recompilador + este launcher, y el binario se
+genera en la máquina del usuario a partir de su ISO:
+
+```bash
+python game/launcher.py
+# o:
+python game/launcher.py --iso "Sword of Etheria, The (Europe) (En,Fr,De,Es,It).iso"
+```
+
+El launcher pide/recuerda el ISO, verifica el MD5, extrae el ELF y el IOP a un
+directorio de datos del usuario, recompila/compila **localmente** (cachea el
+build) y ejecuta. En desarrollo, para reutilizar el árbol actual:
+`python game/launcher.py --work work --no-pin --no-build`.
+
+### Build desde fuente
 
 ```bash
 python build_release.py --iso "Sword of Etheria, The (Europe) (En,Fr,De,Es,It).iso"

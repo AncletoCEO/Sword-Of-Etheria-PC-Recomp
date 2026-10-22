@@ -71,6 +71,8 @@ def main() -> None:
     ap.add_argument("--work", default=os.path.join(REPO_ROOT, "work"), help="dir de trabajo local (no se versiona)")
     ap.add_argument("--tools", default=os.path.join(REPO_ROOT, "tools", "PS2Recomp"), help="clon de PS2Recomp")
     ap.add_argument("--jobs", default="4", help="paralelismo del build (default 4, seguro contra OOM)")
+    ap.add_argument("--no-pin", action="store_true",
+                    help="no hacer checkout del pin del runtime; usar el árbol local (desarrollo)")
     ap.add_argument("--check-only", action="store_true", help="solo verifica MD5 y sale")
     args = ap.parse_args()
 
@@ -79,21 +81,27 @@ def main() -> None:
         return
 
     # A1: runtime pineado + parches del juego (reproducibilidad).
-    if os.path.isdir(os.path.join(args.tools, ".git")):
-        head = subprocess.run(["git", "rev-parse", "HEAD"], cwd=args.tools,
-                              capture_output=True, text=True)
-        if head.returncode == 0 and head.stdout.strip() != PS2RECOMP_PIN:
-            print(f"tools en {head.stdout.strip()}, pineando a {PS2RECOMP_PIN}...")
-            run(["git", "checkout", PS2RECOMP_PIN], cwd=args.tools)
+    recomp = os.path.join(args.tools, "out", "ps2_recomp")
+    if os.path.isfile(recomp):
+        print(f"usando ps2_recomp precompilado: {recomp}")
     else:
-        # El runtime se clona del FORK (no del original ran-j/PS2Recomp): el fork es
-        # el que tiene los parches del juego ya incluidos en el commit pineado.
-        run(["git", "clone", "git@github.com:AncletoCEO/Ps2Recomp-of-etheria.git", args.tools])
-        run(["git", "checkout", PS2RECOMP_PIN], cwd=args.tools)
+        if os.path.isdir(os.path.join(args.tools, ".git")):
+            if args.no_pin:
+                print("usando árbol local del runtime (--no-pin); no se hace checkout")
+            else:
+                head = subprocess.run(["git", "rev-parse", "HEAD"], cwd=args.tools,
+                                      capture_output=True, text=True)
+                if head.returncode == 0 and head.stdout.strip() != PS2RECOMP_PIN:
+                    print(f"tools en {head.stdout.strip()}, pineando a {PS2RECOMP_PIN}...")
+                    run(["git", "checkout", PS2RECOMP_PIN], cwd=args.tools)
+        elif not os.path.isfile(os.path.join(args.tools, "CMakeLists.txt")):
+            # El runtime se clona del FORK (no del original ran-j/PS2Recomp): el fork es
+            # el que tiene los parches del juego ya incluidos en el commit pineado.
+            run(["git", "clone", "git@github.com:AncletoCEO/Ps2Recomp-of-etheria.git", args.tools])
+            run(["git", "checkout", PS2RECOMP_PIN], cwd=args.tools)
     # game/apply_patches.py quedo obsoleto: los parches viven en el fork pineado
-    # (el CI tampoco lo corre).
-    # A2: fuente de verdad game/ -> work/build-game/ (dev).
-    run([sys.executable, os.path.join(REPO_ROOT, "game", "sync_work.py")])
+    # (el CI tampoco lo corre). El release compila desde game/ directamente; el
+    # cache de dev work/build-game lo sincroniza game/sync_work.py aparte.
 
     elf_dir = os.path.join(args.work, "elf")
     gen_dir = os.path.join(args.work, "generated")
@@ -101,13 +109,13 @@ def main() -> None:
     os.makedirs(elf_dir, exist_ok=True)
 
     elf_path = os.path.join(elf_dir, ELF_NAME)
-    if not os.path.isfile(elf_path):
+    if not os.path.isfile(elf_path) or not os.path.isdir(os.path.join(elf_dir, "IOP")):
         extractor = shutil.which("bsdtar") or shutil.which("7z")
         if not extractor:
             sys.exit("error: se necesita bsdtar o 7z para extraer el ELF del ISO")
-        run([extractor, "x", args.iso, "-o" + elf_dir, ELF_NAME]
+        run([extractor, "x", args.iso, "-o" + elf_dir, ELF_NAME, "IOP"]
             if os.path.basename(extractor) == "7z"
-            else [extractor, "-x", "-C", elf_dir, "-f", args.iso, ELF_NAME])
+            else [extractor, "-x", "-C", elf_dir, "-f", args.iso, ELF_NAME, "IOP"])
 
     config_path = os.path.join(args.work, "config-release.toml")
     with open(config_path, "w") as f:
@@ -138,7 +146,11 @@ def main() -> None:
     run([sys.executable, os.path.join(REPO_ROOT, "game", "split_monsters.py"), gen_dir])
 
     run(["cmake", "-S", os.path.join(REPO_ROOT, "game"), "-B", build_dir,
-         "-G", "Unix Makefiles", "-DCMAKE_BUILD_TYPE=Release"])
+         "-G", "Unix Makefiles", "-DCMAKE_BUILD_TYPE=Release",
+         f"-DREPO_ROOT={REPO_ROOT}",
+         f"-DPS2RECOMP_DIR={args.tools}",
+         f"-DGENERATED_DIR={gen_dir}",
+         f"-DPS2X_DEFAULT_BOOT_ELF={elf_path}"])
     run(["cmake", "--build", build_dir, "-j", args.jobs])
     print(f"listo: {os.path.join(build_dir, 'sword_etheria')}")
 

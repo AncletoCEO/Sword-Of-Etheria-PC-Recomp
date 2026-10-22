@@ -55,3 +55,6 @@ pcsx2 log*.txt
 
 # Nota: NO ignorar a propósito: game/, build_release.py, README.md, .github/
 # para que el release y CI sí se versionen.
+
+# Artefactos de release locales (binario grande; se publican como asset, no en git)
+dist/

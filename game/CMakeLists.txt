@@ -20,8 +20,8 @@ endif()
 if(WIN32)
     file(TO_CMAKE_PATH "${REPO_ROOT}" REPO_ROOT)
 endif()
-set(PS2RECOMP_DIR "${REPO_ROOT}/tools/PS2Recomp")
-set(GENERATED_DIR "${REPO_ROOT}/work/generated")
+set(PS2RECOMP_DIR "${REPO_ROOT}/tools/PS2Recomp" CACHE PATH "Clon de PS2Recomp")
+set(GENERATED_DIR "${REPO_ROOT}/work/generated" CACHE PATH "C++ generado por ps2_recomp")
 
 project(sword_etheria_recomp LANGUAGES C CXX)
 
@@ -29,7 +29,7 @@ set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 # Arranca el SLES_537.68 europeo por defecto (argv[1] lo sobreescribe).
-set(PS2X_DEFAULT_BOOT_ELF "${REPO_ROOT}/work/elf/SLES_537.68" CACHE STRING "" FORCE)
+set(PS2X_DEFAULT_BOOT_ELF "${REPO_ROOT}/work/elf/SLES_537.68" CACHE STRING "ELF de arranque por defecto")
 
 # Solo los submódulos necesarios (el árbol completo arrastra ps2xStudio,
 # que asume ser el proyecto top-level vía CMAKE_SOURCE_DIR).
