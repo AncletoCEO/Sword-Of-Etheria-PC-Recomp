@@ -718,3 +718,20 @@ secuencia language→fade→FMV, camino IPU/HLE y A/B.
   `FUN_004f21b0` (dispatcher de callbacks), y muere el hilo principal. En los
   savestates reales `0x1a1b00/0x1a1b20` están en cero. Es la transición a
   Task1/FMV; requiere investigación (v98). El fix del fade es independiente.
+
+### 18.8 Bloqueo tras el fade: `FUN_004f21b0` → `0x1a1b00` (2026-10-22)
+
+- Con el fade ya natural, a **f=560** aparece
+  `[guest-branch:missing-target] kind=IndirectCall source=0x4f21d4
+  target=0x1a1b00`, `codeRegion=no`, y el hilo principal muere.
+- `FUN_004f21b0` (`0x4f21b0..0x4f21f4`) recorre un array `[a0,a1)` de punteros
+  de 4 bytes y hace `jalr`; en el fallo `a0=0x1a1b20`, `a1=0x1a1b24`,
+  `*(0x1a1b20)=0x1a1b00` (0x20 antes del array). No es el stack actual
+  (`sp=0x1fedd60`).
+- `0x1a1b00` no está en el ELF; sus palabras (`8f84f558 3c010016 8f83f55c
+  ac244840...`) parecen MIPS y escriben a `0x00164840`. En los savestates
+  tempranos (`videoformat_menu`, `draw_vif1kick`) `0x1a1b00/0x1a1b20` están en
+  cero; puede crearse más tarde en la transición a Task1/FMV.
+- Consulta **v98** escrita: `work/gemini/msg_gemini_v98.md` (pendiente).
+  Pregunta identidad/rol de `FUN_004f21b0` y de la lista, quién llena
+  `0x1a1b20`, naturaleza de `0x1a1b00` y cómo manejar código dinámico.
